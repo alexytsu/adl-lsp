@@ -1,0 +1,10 @@
+---
+source: src/parser/definition.rs
+expression: user
+---
+- Import:
+    source_module: input.message
+    target_module_path:
+      - common
+      - db
+    identifier: User

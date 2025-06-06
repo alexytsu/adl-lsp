@@ -1,0 +1,7 @@
+module input.message {
+    /// A message is a piece of content that can be sent to a user.
+    struct Message {
+        String title;
+        String body;
+    };
+};

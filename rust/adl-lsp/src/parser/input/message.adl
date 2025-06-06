@@ -1,0 +1,16 @@
+module input.message {
+    import common.db.User;
+
+    type Name = String;
+
+    struct Content {
+        String title;
+        String body;
+    };
+
+    struct Message {
+        Name author;
+        Content content;
+        User user;
+    };
+};

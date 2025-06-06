@@ -1,0 +1,6 @@
+---
+source: src/parser/hover.rs
+expression: title
+---
+- language: adl
+  value: String title;

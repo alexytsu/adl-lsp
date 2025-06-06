@@ -1,0 +1,13 @@
+---
+source: src/parser/definition.rs
+expression: name
+---
+- Resolved:
+    uri: "file://input/message.adl"
+    range:
+      start:
+        line: 3
+        character: 9
+      end:
+        line: 3
+        character: 13

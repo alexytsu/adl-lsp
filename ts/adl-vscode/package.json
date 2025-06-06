@@ -1,0 +1,92 @@
+{
+  "name": "adl-vscode",
+  "displayName": "ADL",
+  "description": "LSP support for Algebraic Data Language",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "ADL Configuration",
+      "properties": {
+        "adl.lspPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the ADL server executable."
+        },
+        "adl.workingDirectories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "adl"
+          ],
+          "description": "Working directories where root ADL packages are located"
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "adl",
+        "extensions": [
+          ".adl"
+        ],
+        "aliases": [
+          "ADL",
+          "adl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "adl",
+        "scopeName": "source.adl",
+        "path": "./syntaxes/adl.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "adl-vscode.restart-language-server",
+        "title": "ADL: Restart Language Server"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.100.0",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.25.3",
+    "eslint": "^9.25.1",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
