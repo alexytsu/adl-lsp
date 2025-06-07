@@ -20,7 +20,8 @@ The Rust code in `adl-lsp` borrows code and architecture from
 
 When paired with the VSCode extension you will be provided
 
-- ✅ Syntax highlighting
+- ✅ Syntax highlighting (by [guyNeara](https://github.com/guyNeara) from
+  [adl-vscode-highlight](https://github.com/adl-lang/adl-vscode-highlight))
 - ✅ Go to definition
 - ✅ Diagnostics
 - ✅ Hover information

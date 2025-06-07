@@ -30,6 +30,13 @@ export function activate(context: ExtensionContext) {
     adlRoot = "adl";
   }
 
+  let adlLspPath = context.globalState.get("adl.lspPath");
+  if (typeof adlLspPath !== "string") {
+    adlLspPath = "adl-lsp";
+  }
+
+  console.error("adlLspPath", adlLspPath);
+
   // Debug mode
   // const run: Executable = {
   //   command: "cargo",
