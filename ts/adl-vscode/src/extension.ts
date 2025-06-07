@@ -1,6 +1,3 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
-import path from "path";
 import v from "vscode";
 import { ExtensionContext } from "vscode";
 import os from "os";
@@ -8,8 +5,6 @@ import os from "os";
 import {
   LanguageClient,
   LanguageClientOptions,
-  ServerOptions,
-  TransportKind,
   Executable,
 } from "vscode-languageclient/node";
 
