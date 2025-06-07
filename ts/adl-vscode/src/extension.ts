@@ -19,20 +19,33 @@ let client: LanguageClient;
 export function activate(context: ExtensionContext) {
   console.log("ADL Language Server is starting...");
 
-  const adlWorkingDirectories = context.globalState.get("adl.workingDirectories");
+  const adlWorkingDirectories = context.globalState.get(
+    "adl.workingDirectories"
+  );
   let adlRoot: string;
   if (adlWorkingDirectories instanceof Array) {
-    // TODO: handle multiple working directories 
+    // TODO: handle multiple working directories
     adlRoot = adlWorkingDirectories[0];
   } else {
     adlRoot = "adl";
   }
 
+  // Debug mode
+  // const run: Executable = {
+  //   command: "cargo",
+  //   args: ["run", "--bin", "adl-lsp", "--", "--adl-root", adlRoot], // TODO: pass working directories as an argument
+  //   options: {
+  //     cwd: "/Users/alexytsu/Develop/Repositories/adl-lang/adl-lsp/rust/adl-lsp",
+  //   },
+  // };
+
   const run: Executable = {
-    command: "cargo",
-    args: ["run", "--bin", "adl-lsp", "--", "--adl-root", adlRoot], // TODO: pass working directories as an argument
+    command: "adl-lsp",
+    args: ["--adl-root", adlRoot], // TODO: pass working directories as an argument
     options: {
-      cwd: "/Users/alexytsu/Develop/Repositories/adl-lang/adl-lsp/rust/adl-lsp",
+      env: {
+        RUST_LOG: "debug",
+      },
     },
   };
 
