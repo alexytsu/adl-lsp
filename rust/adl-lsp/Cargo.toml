@@ -4,16 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0"
 async-lsp = { version = "0.2.2", features = ["tokio"] }
 lsp-types = "0.95.0"
+serde = "1.0.219"
 tokio = { version = "1.27.0", features = ["full" ] }
 tower = "0.5.2"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 tree-sitter = "0.25.6"
-tree-sitter-adl = { version = "0.1.0", path = "../../../tree-sitter-adl" }
-anyhow = "1.0"
-serde = "1.0.219"
+tree-sitter-adl = { version = "0.1.0" }
+
+# useful for local development
+# tree-sitter-adl = { version = "0.1.0", path = "../../../tree-sitter-adl" }
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["yaml"] }
