@@ -3,6 +3,7 @@
 import path from "path";
 import v from "vscode";
 import { ExtensionContext } from "vscode";
+import os from "os";
 
 import {
   LanguageClient,
@@ -17,9 +18,9 @@ let client: LanguageClient;
 export function activate(context: ExtensionContext) {
   console.log("ADL Language Server is starting...");
 
-  const adlWorkingDirectories = context.globalState.get(
-    "adl.workingDirectories"
-  );
+  const adlWorkingDirectories = v.workspace
+    .getConfiguration("adl")
+    .get("workingDirectories");
   let adlRoot: string;
   if (adlWorkingDirectories instanceof Array) {
     // TODO: handle multiple working directories
@@ -28,7 +29,8 @@ export function activate(context: ExtensionContext) {
     adlRoot = "adl";
   }
 
-  let adlLspPath: string = v.workspace.getConfiguration("adl").get("lspPath") ?? "adl-lsp";
+  let adlLspPath: string =
+    v.workspace.getConfiguration("adl").get("lspPath") ?? "adl-lsp";
 
   // Debug mode
   // const run: Executable = {
@@ -38,6 +40,18 @@ export function activate(context: ExtensionContext) {
   //     cwd: "/Users/alexytsu/Develop/Repositories/adl-lang/adl-lsp/rust/adl-lsp",
   //   },
   // };
+
+  v.window.showInformationMessage(`adlLspPath: ${adlLspPath}`);
+  v.window.showInformationMessage(`homeDir: ${os.homedir()}`);
+  if (
+    adlLspPath.startsWith("~") ||
+    adlLspPath.startsWith("${userHome}") ||
+    adlLspPath.startsWith("$HOME")
+  ) {
+    adlLspPath = adlLspPath.replace("~", os.homedir());
+    adlLspPath = adlLspPath.replace("${userHome}", os.homedir());
+    adlLspPath = adlLspPath.replace("$HOME", os.homedir());
+  }
 
   const run: Executable = {
     command: adlLspPath,
