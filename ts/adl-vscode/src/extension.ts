@@ -14,8 +14,6 @@ import {
 
 let client: LanguageClient;
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: ExtensionContext) {
   console.log("ADL Language Server is starting...");
 
@@ -30,12 +28,7 @@ export function activate(context: ExtensionContext) {
     adlRoot = "adl";
   }
 
-  let adlLspPath = context.globalState.get("adl.lspPath");
-  if (typeof adlLspPath !== "string") {
-    adlLspPath = "adl-lsp";
-  }
-
-  console.error("adlLspPath", adlLspPath);
+  let adlLspPath: string = v.workspace.getConfiguration("adl").get("lspPath") ?? "adl-lsp";
 
   // Debug mode
   // const run: Executable = {
@@ -47,8 +40,7 @@ export function activate(context: ExtensionContext) {
   // };
 
   const run: Executable = {
-    command: "adl-lsp",
-    args: ["--adl-root", adlRoot], // TODO: pass working directories as an argument
+    command: adlLspPath,
     options: {
       env: {
         RUST_LOG: "debug",

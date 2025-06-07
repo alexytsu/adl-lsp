@@ -13,7 +13,7 @@
   "contributes": {
     "configuration": {
       "type": "object",
-      "title": "ADL Configuration",
+      "title": "ADL",
       "properties": {
         "adl.lspPath": {
           "type": "string",
