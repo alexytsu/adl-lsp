@@ -11,7 +11,11 @@ import {
 
 let client: LanguageClient;
 
-export function activate(context: ExtensionContext) {
+const REQUIRED_MAJOR_VERSION = 0;
+const REQUIRED_MINOR_VERSION = 3;
+const REQUIRED_PATCH_VERSION = 0;
+
+export async function activate(context: ExtensionContext) {
   console.log("ADL Language Server is starting...");
 
   const adlPackageRootsConfig = v.workspace
@@ -100,7 +104,21 @@ export function activate(context: ExtensionContext) {
     clientOptions
   );
 
-  client.start();
+  await client.start();
+
+  const serverVersion = client.initializeResult?.serverInfo?.version;
+  console.log("Server version: ", serverVersion);
+
+  let checkResult = checkVersion(serverVersion);
+
+  const requiredVersion = `${REQUIRED_MAJOR_VERSION}.${REQUIRED_MINOR_VERSION}.${REQUIRED_PATCH_VERSION}`;
+  const requiredVersionMessage = `adl-lsp ${serverVersion} is not supported. Please update to version ${requiredVersion} or later.\nYou can update by running cargo install adl-lsp`;
+
+  if (checkResult !== "version-supported") {
+    v.window.showErrorMessage(requiredVersionMessage);
+    console.error("checkResult: ", checkResult);
+    console.error(requiredVersionMessage);
+  }
 
   const disposable = v.commands.registerCommand(
     "adl-vscode.restart-language-server",
@@ -120,4 +138,33 @@ export function deactivate() {
     return undefined;
   }
   return client.stop();
+}
+
+type CheckVersionResult =
+  | "version-not-specified"
+  | "version-not-supported"
+  | "version-supported";
+
+function checkVersion(serverVersion: string | undefined): CheckVersionResult {
+  if (!serverVersion) {
+    return "version-not-specified";
+  }
+
+  const [serverMajorVersion, serverMinorVersion, serverPatchVersion] =
+    serverVersion.split(".").map((v) => parseInt(v)) ?? [];
+
+  if (serverMajorVersion < REQUIRED_MAJOR_VERSION) {
+    return "version-not-supported";
+  } else if (serverMajorVersion === REQUIRED_MAJOR_VERSION) {
+    if (serverMinorVersion < REQUIRED_MINOR_VERSION) {
+      return "version-not-supported";
+    } else if (serverMinorVersion === REQUIRED_MINOR_VERSION) {
+      if (serverPatchVersion < REQUIRED_PATCH_VERSION) {
+        return "version-not-supported";
+      }
+      return "version-supported";
+    }
+    return "version-supported";
+  }
+  return "version-supported";
 }

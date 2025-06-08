@@ -6,15 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockWriteGuard};
 use async_lsp::router::Router;
 use async_lsp::{ClientSocket, Error, LanguageClient, ResponseError};
 use lsp_types::{
-    DiagnosticOptions, DiagnosticServerCapabilities, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReportPartialResult,
-    DocumentDiagnosticReportResult, FileOperationFilter, FileOperationPattern,
-    FileOperationPatternKind, FileOperationRegistrationOptions, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, OneOf, PublishDiagnosticsParams,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions,
-    WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
+    DiagnosticOptions, DiagnosticServerCapabilities, DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReportPartialResult, DocumentDiagnosticReportResult, FileOperationFilter, FileOperationPattern, FileOperationPatternKind, FileOperationRegistrationOptions, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location, OneOf, PublishDiagnosticsParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities
 };
 use tracing::{debug, error};
 
@@ -156,7 +148,12 @@ impl Server {
                 }),
                 ..ServerCapabilities::default()
             },
-            server_info: None,
+            server_info: Some({
+                ServerInfo {
+                    name: String::from("ADL Language Server"),
+                    version: Some(String::from(env!("CARGO_PKG_VERSION"))),
+                }
+            }),
         })
     }
 
