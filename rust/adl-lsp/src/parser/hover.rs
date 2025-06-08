@@ -34,6 +34,7 @@ impl ParsedTree {
             .into_iter()
             .filter_map(|n| {
                 n.child(0)
+                    .filter(|id_node| Self::is_from_definition(id_node))
                     .and_then(|id_node| id_node.utf8_text(content.as_ref()).ok())
                     .filter(|text| *text == identifier)
                     .map(|_| n)
