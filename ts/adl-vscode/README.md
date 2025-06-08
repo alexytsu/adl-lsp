@@ -22,7 +22,7 @@ Further planned features
 
 ## Requirements
 
-You will need to install [adl-ls](https://github.com/alexytsu/adl-lsp) and have
+You will need to install [adl-lsp](https://github.com/alexytsu/adl-lsp) and have
 it on your path. The easiest way to do this is `cargo install adl-lsp`.
 
 ## Extension Settings

@@ -27,6 +27,15 @@ export function activate(context: ExtensionContext) {
   let adlLspPath: string =
     v.workspace.getConfiguration("adl").get("lspPath") ?? "adl-lsp";
 
+  const run: Executable = {
+    command: adlLspPath,
+    options: {
+      env: {
+        RUST_LOG: "debug",
+      },
+    },
+  };
+
   // Debug mode
   // const run: Executable = {
   //   command: "cargo",
@@ -36,8 +45,7 @@ export function activate(context: ExtensionContext) {
   //   },
   // };
 
-  v.window.showInformationMessage(`adlLspPath: ${adlLspPath}`);
-  v.window.showInformationMessage(`homeDir: ${os.homedir()}`);
+  // HACK path substitution
   if (
     adlLspPath.startsWith("~") ||
     adlLspPath.startsWith("${userHome}") ||
@@ -47,15 +55,6 @@ export function activate(context: ExtensionContext) {
     adlLspPath = adlLspPath.replace("${userHome}", os.homedir());
     adlLspPath = adlLspPath.replace("$HOME", os.homedir());
   }
-
-  const run: Executable = {
-    command: adlLspPath,
-    options: {
-      env: {
-        RUST_LOG: "debug",
-      },
-    },
-  };
 
   const serverOptions = {
     run,
@@ -78,9 +77,6 @@ export function activate(context: ExtensionContext) {
 
   client.start();
 
-  // The command has been defined in the package.json file
-  // Now provide the implementation of the command with registerCommand
-  // The commandId parameter must match the command field in package.json
   const disposable = v.commands.registerCommand(
     "adl-vscode.restart-language-server",
     async () => {
