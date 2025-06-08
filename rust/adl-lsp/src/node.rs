@@ -8,33 +8,22 @@ pub enum NodeKind {
 
     // Identifiers and Names
     Identifier,
-    ModuleName,
     ScopedName,
+    TypeName,
 
     // Type System
-    TypeName,
     TypeParameters,
-    TypeExpression,
     TypeArguments,
+    TypeExpression,
     PrimitiveType,
-
-    // Structs
-    StructDefinition,
-    StructName,
-    StructBody,
-    StructField,
-    FieldType,
-    FieldName,
-
-    // Unions
-    UnionDefinition,
-    UnionName,
-    UnionBody,
-    UnionField,
 
     // Type Definitions
     TypeDefinition,
     NewtypeDefinition,
+    StructDefinition,
+    UnionDefinition,
+    Field,
+    FieldBlock,
 
     // Module System
     Module,
@@ -63,19 +52,14 @@ pub enum NodeKind {
 impl NodeKind {
     pub fn is_user_defined_name(n: &Node) -> bool {
         Self::is_identifier(n)
-            // || Self::is_module_name(n)
-            || Self::is_struct_name(n)
-            || Self::is_union_name(n)
             || Self::is_type_name(n)
-            || Self::is_field_name(n)
+            || Self::is_scoped_name(n)
     }
 
     pub fn is_definition(n: &Node) -> bool {
         Self::is_import_declaration(n)
-            || Self::is_union_name(n)
-            || Self::is_struct_name(n)
-            || Self::is_module_name(n)
             || Self::is_type_name(n)
+            || Self::is_import_declaration(n)
     }
 }
 
@@ -88,7 +72,6 @@ impl NodeKind {
 
             // Identifiers and Names
             Self::Identifier => "identifier",
-            Self::ModuleName => "module_name",
             Self::ScopedName => "scoped_name",
 
             // Type System
@@ -100,17 +83,11 @@ impl NodeKind {
 
             // Structs
             Self::StructDefinition => "struct_definition",
-            Self::StructName => "struct_name",
-            Self::StructBody => "struct_body",
-            Self::StructField => "struct_field",
-            Self::FieldType => "field_type",
-            Self::FieldName => "field_name",
+            Self::Field => "field",
+            Self::FieldBlock => "field_block",
 
             // Unions
             Self::UnionDefinition => "union_definition",
-            Self::UnionName => "union_name",
-            Self::UnionBody => "union_body",
-            Self::UnionField => "union_field",
 
             // Type Definitions
             Self::TypeDefinition => "type_definition",
@@ -155,8 +132,8 @@ impl NodeKind {
         n.kind() == Self::Identifier.as_str()
     }
 
-    pub fn is_module_name(n: &Node) -> bool {
-        n.kind() == Self::ModuleName.as_str()
+    pub fn is_module_definition(n: &Node) -> bool {
+        n.kind() == Self::ModuleDefinition.as_str()
     }
 
     pub fn is_scoped_name(n: &Node) -> bool {
@@ -189,41 +166,17 @@ impl NodeKind {
         n.kind() == Self::StructDefinition.as_str()
     }
 
-    pub fn is_struct_name(n: &Node) -> bool {
-        n.kind() == Self::StructName.as_str()
+    pub fn is_field_block(n: &Node) -> bool {
+        n.kind() == Self::FieldBlock.as_str()
     }
 
-    pub fn is_struct_body(n: &Node) -> bool {
-        n.kind() == Self::StructBody.as_str()
-    }
-
-    pub fn is_struct_field(n: &Node) -> bool {
-        n.kind() == Self::StructField.as_str()
-    }
-
-    pub fn is_field_type(n: &Node) -> bool {
-        n.kind() == Self::FieldType.as_str()
-    }
-
-    pub fn is_field_name(n: &Node) -> bool {
-        n.kind() == Self::FieldName.as_str()
+    pub fn is_field(n: &Node) -> bool {
+        n.kind() == Self::Field.as_str()
     }
 
     // Unions
     pub fn is_union_definition(n: &Node) -> bool {
         n.kind() == Self::UnionDefinition.as_str()
-    }
-
-    pub fn is_union_name(n: &Node) -> bool {
-        n.kind() == Self::UnionName.as_str()
-    }
-
-    pub fn is_union_body(n: &Node) -> bool {
-        n.kind() == Self::UnionBody.as_str()
-    }
-
-    pub fn is_union_field(n: &Node) -> bool {
-        n.kind() == Self::UnionField.as_str()
     }
 
     // Type Definitions
@@ -238,10 +191,6 @@ impl NodeKind {
     // Module System
     pub fn is_module(n: &Node) -> bool {
         n.kind() == Self::Module.as_str()
-    }
-
-    pub fn is_module_definition(n: &Node) -> bool {
-        n.kind() == Self::ModuleDefinition.as_str()
     }
 
     pub fn is_module_body(n: &Node) -> bool {

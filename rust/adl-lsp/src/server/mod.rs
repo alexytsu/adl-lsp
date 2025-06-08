@@ -17,6 +17,7 @@ use lsp_types::{
 };
 use tracing::{debug, error};
 
+use crate::node::NodeKind;
 use crate::parser::definition::{Definition, DefinitionLocation, UnresolvedImport};
 use crate::parser::hover::Hover as HoverTrait;
 use crate::parser::tree::Tree;
@@ -169,7 +170,7 @@ impl Server {
 
         if let Some(tree) = trees.get(&uri) {
             let contents = documents.get(&uri).unwrap().as_bytes();
-            if let Some(identifier) = tree.get_user_defined_text(&position, contents) {
+            if let Some((identifier, _node)) = tree.get_user_defined_text(&position, contents) {
                 let mut hover_items = tree.hover(identifier, contents);
 
                 debug!("Hovering over: {}", identifier);
@@ -237,84 +238,118 @@ impl Server {
         let documents = &mut self.state.documents.write().expect("poisoned");
         let parser = &mut self.state.parser.lock().expect("poisoned");
 
-        match trees.get(&uri) {
-            Some(tree) => {
-                // Get the identifier at the current position
-                if let Some(identifier) =
-                    tree.get_user_defined_text(&position, documents.get(&uri).unwrap().as_bytes())
-                {
-                    debug!("Found identifier: {}", identifier);
+        let tree = trees.get(&uri);
+        if tree.is_none() {
+            return Ok(None);
+        }
+        let tree = tree.unwrap();
 
-                    // Find all definition locations for this identifier
-                    let definition_locations =
-                        tree.definition(identifier, documents.get(&uri).unwrap().as_bytes());
-                    debug!("Found definition locations: {:?}", definition_locations);
+        if let Some((identifier, node)) = tree.get_user_defined_text(
+            &position,
+            documents.get(&uri).unwrap_or(&"".into()).as_bytes(),
+        ) {
+            debug!(
+                "found identifier: {} of node_type {:?}",
+                identifier,
+                node.kind()
+            );
 
-                    if !definition_locations.is_empty() {
-                        let mut resolved_locations: Vec<Location> = vec![];
-                        let mut unresolved_imports: Vec<UnresolvedImport> = vec![];
+            // TODO: factor this logic into the ParsedTree impl
+            let parent = node.parent();
+            if parent.is_none() {
+                return Ok(None);
+            }
+            let parent = parent.unwrap();
+            debug!("parent: {:?}", parent.kind());
 
-                        for definition_location in definition_locations {
-                            match definition_location {
-                                DefinitionLocation::Resolved(location) => {
-                                    resolved_locations.push(location);
-                                }
-                                DefinitionLocation::Import(unresolved_import) => {
-                                    unresolved_imports.push(unresolved_import);
-                                }
-                            }
-                        }
+            // could check if grandparent is struct_definition or union_definition etc.
+            if !NodeKind::is_scoped_name(&parent) {
+                return Ok(None);
+            }
 
-                        for unresolved_import in unresolved_imports {
-                            if let Some(resolved_uri) =
-                                modules::resolve_import(&uri, &unresolved_import)
-                            {
-                                debug!("Unresolved import: {unresolved_import:?}");
-                                debug!("Resolved import: {resolved_uri:?}");
-                                // read the contents of the resolved uri manually
-                                let contents = std::fs::read_to_string(resolved_uri.path());
-                                if let Err(e) = contents {
-                                    error!("Failed to read contents of {resolved_uri:?}: {e:?}");
-                                    continue;
-                                }
-                                let contents = contents.unwrap();
+            // Find all definition locations for this identifier in the current file
+            let definition_locations = tree.definition(
+                identifier,
+                documents.get(&uri).unwrap_or(&"".into()).as_bytes(),
+            );
 
-                                // TODO: don't do this if we've already ingested the document
-                                Self::ingest_document(
-                                    &mut self.client,
-                                    documents,
-                                    trees,
-                                    parser,
-                                    resolved_uri.clone(),
-                                    contents.clone(),
-                                );
+            debug!(
+                "found definition locations: {:?}",
+                &definition_locations
+                    .iter()
+                    .map(|d| match d {
+                        DefinitionLocation::Resolved(location) => location.uri.to_string(),
+                        DefinitionLocation::Import(unresolved_import) =>
+                            format!("import from {:?}", unresolved_import.target_module_path),
+                    })
+                    .collect::<Vec<String>>()
+            );
 
-                                let imported_tree = trees.get(&resolved_uri).unwrap();
+            if definition_locations.is_empty() {
+                return Ok(None);
+            }
 
-                                let definition_locations = imported_tree
-                                    .definition(&unresolved_import.identifier, contents.as_bytes());
-                                for definition_location in definition_locations {
-                                    match definition_location {
-                                        DefinitionLocation::Resolved(location) => {
-                                            resolved_locations.push(location);
-                                        }
-                                        DefinitionLocation::Import(_) => {
-                                            // no nested imports
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Ok(Some(GotoDefinitionResponse::Array(resolved_locations)))
-                    } else {
-                        Ok(None)
+            // Split into resolved and unresolved imports
+            let mut resolved_locations: Vec<Location> = vec![];
+            let mut unresolved_imports: Vec<UnresolvedImport> = vec![];
+            for definition_location in definition_locations {
+                match definition_location {
+                    DefinitionLocation::Resolved(location) => {
+                        resolved_locations.push(location);
                     }
-                } else {
-                    Ok(None)
+                    DefinitionLocation::Import(unresolved_import) => {
+                        unresolved_imports.push(unresolved_import);
+                    }
                 }
             }
-            None => Ok(None),
+
+            // Resolve the unresolved imports
+            for unresolved_import in unresolved_imports {
+                if let Some(resolved_uri) = modules::resolve_import(&uri, &unresolved_import) {
+                    debug!("unresolved import: {unresolved_import:?} resolved to {resolved_uri:?}");
+
+                    // read the contents of the resolved uri manually
+                    let contents = std::fs::read_to_string(resolved_uri.path());
+                    if let Err(e) = contents {
+                        error!("Failed to read contents of {resolved_uri:?}: {e:?}");
+                        continue;
+                    }
+                    let contents = contents.unwrap_or_default();
+
+                    // NOTE: maybe can skip do this if we've already ingested the document
+                    Self::ingest_document(
+                        &mut self.client,
+                        documents,
+                        trees,
+                        parser,
+                        resolved_uri.clone(),
+                        contents.clone(),
+                    );
+
+                    let imported_tree = trees.get(&resolved_uri).unwrap();
+                    let definition_locations = imported_tree
+                        .definition(&unresolved_import.identifier, contents.as_bytes());
+                    for definition_location in definition_locations {
+                        match definition_location {
+                            DefinitionLocation::Resolved(location) => {
+                                resolved_locations.push(location);
+                            }
+                            DefinitionLocation::Import(_) => {
+                                // no nested imports? perhaps this can technically be supported by a recursive lookup
+                                error!("import not resolved after one level of resolution");
+                            }
+                        }
+                    }
+                }
+            }
+
+            if resolved_locations.is_empty() {
+                return Ok(None);
+            }
+
+            Ok(Some(GotoDefinitionResponse::Array(resolved_locations)))
+        } else {
+            Ok(None)
         }
     }
 

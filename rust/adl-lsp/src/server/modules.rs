@@ -12,12 +12,19 @@ pub fn resolve_import(source_uri: &Url, unresolved_import: &UnresolvedImport) ->
         unresolved_import.identifier
     );
 
-    // TODO: either get the adl root from the `workspace_directories` config or corroborate it here
+    // TODO: get the adl roots from the `workspace_directories` config 
+    // We can only resolve imports within the same adl location via this technique so all adl files must be colocated
+    // However, to resolve the adl standard library and `sys` modules as well as other modules (such as those from `helix-core`) we'd need
+    // to be aware of other adl roots
+
     // Get the root of the adl workspace
     let source_path = Path::new(source_uri.path());
     let source_module_path: Vec<&str> = unresolved_import.source_module.split(".").collect();
     let source_module_depth = source_module_path.len();
-    let adl_root = source_path.ancestors().nth(source_module_depth).unwrap();
+    let adl_root = source_path
+        .ancestors()
+        .nth(source_module_depth)
+        .unwrap();
     debug!("ADL root: {:?}", adl_root);
 
     // Resolve module path to file path

@@ -1,0 +1,7 @@
+---
+source: src/parser/hover.rs
+assertion_line: 232
+expression: message
+---
+- language: adl
+  value: "/// A message is a piece of content that can be sent to a user.\n    struct Message {\n        String title;\n        String body;\n    };"

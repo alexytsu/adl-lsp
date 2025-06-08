@@ -12,7 +12,11 @@ pub trait Tree {
         f: fn(&Node) -> bool,
         early: bool,
     ) -> Vec<Node<'a>>;
-    fn get_user_defined_text<'a>(&'a self, pos: &Position, content: &'a [u8]) -> Option<&'a str>;
+    fn get_user_defined_text<'a>(
+        &'a self,
+        pos: &Position,
+        content: &'a [u8],
+    ) -> Option<(&'a str, Node<'a>)>;
     fn get_user_defined_node<'a>(&'a self, pos: &Position) -> Option<Node<'a>>;
     fn get_node_at_position<'a>(&'a self, pos: &Position) -> Option<Node<'a>>;
     #[allow(dead_code)]
@@ -70,9 +74,13 @@ impl Tree for ParsedTree {
         }
     }
 
-    fn get_user_defined_text<'a>(&'a self, pos: &Position, content: &'a [u8]) -> Option<&'a str> {
+    fn get_user_defined_text<'a>(
+        &'a self,
+        pos: &Position,
+        content: &'a [u8],
+    ) -> Option<(&'a str, Node<'a>)> {
         self.get_user_defined_node(pos)
-            .map(|n| n.utf8_text(content.as_ref()).expect("utf-8 parse error"))
+            .map(|n| (n.utf8_text(content.as_ref()).expect("utf-8 parse error"), n))
     }
 
     fn get_user_defined_node<'a>(&'a self, pos: &Position) -> Option<Node<'a>> {

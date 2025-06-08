@@ -40,6 +40,19 @@ impl Definition for ParsedTree {
 }
 
 impl ParsedTree {
+    pub fn is_from_definition(node: &Node<'_>) -> bool {
+        NodeKind::is_definition(node) || node.parent().is_some_and(|p| Self::is_from_definition(&p))
+    }
+
+    pub fn is_from_import_declaration<'a>(node: &Node<'a>) -> (bool, Option<Node<'a>>) {
+        if NodeKind::is_import_declaration(node) {
+            (true, Some(*node))
+        } else {
+            node.parent()
+                .map_or((false, None), |p| Self::is_from_import_declaration(&p))
+        }
+    }
+
     fn definition_impl(
         &self,
         identifier: &str,
@@ -52,12 +65,12 @@ impl ParsedTree {
         }
 
         let locations: Vec<DefinitionLocation> = self
-            .find_all_nodes_from(n, NodeKind::is_identifier)
+            .find_all_nodes_from(n, NodeKind::is_user_defined_name)
             .into_iter()
             .filter(|n| n.utf8_text(content.as_ref()).expect("utf-8 parse error") == identifier)
-            .filter(|n| Self::is_definition_identifier(n))
+            .filter(Self::is_from_definition)
             .map(|n| {
-                if let (true, Some(import_node)) = Self::is_module_import_identifier(&n) {
+                if let (true, Some(import_node)) = Self::is_from_import_declaration(&n) {
                     DefinitionKind::Import(import_node, identifier.into())
                 } else {
                     DefinitionKind::Definition(n)
@@ -102,22 +115,6 @@ impl ParsedTree {
                     identifier, // could be common, strings or StringML
                 })
             }
-        }
-    }
-
-    fn is_definition_identifier(node: &Node<'_>) -> bool {
-        NodeKind::is_definition(node)
-            || node
-                .parent()
-                .is_some_and(|p| Self::is_definition_identifier(&p))
-    }
-
-    fn is_module_import_identifier<'a>(node: &Node<'a>) -> (bool, Option<Node<'a>>) {
-        if NodeKind::is_import_declaration(node) {
-            (true, Some(*node))
-        } else {
-            node.parent()
-                .map_or((false, None), |p| Self::is_module_import_identifier(&p))
         }
     }
 
