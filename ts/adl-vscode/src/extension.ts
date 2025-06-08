@@ -56,15 +56,6 @@ export async function activate(context: ExtensionContext) {
     adlPackageRoots.join(","),
   ];
 
-  // Publish mode
-  const run: Executable = {
-    command: adlLspPath,
-    args: [...adlLspArgs],
-    options: {
-      cwd: "/Users/alexytsu/Develop/Repositories/adl-lang/adl-lsp/rust/adl-lsp",
-    },
-  };
-
   // Debug mode
   // const run: Executable = {
   //   command: "cargo",
@@ -84,6 +75,15 @@ export async function activate(context: ExtensionContext) {
     adlLspPath = adlLspPath.replace("${userHome}", os.homedir());
     adlLspPath = adlLspPath.replace("$HOME", os.homedir());
   }
+
+  // Publish mode
+  const run: Executable = {
+    command: adlLspPath,
+    args: [...adlLspArgs],
+    options: {
+      cwd: "/Users/alexytsu/Develop/Repositories/adl-lang/adl-lsp/rust/adl-lsp",
+    },
+  };
 
   const serverOptions = {
     run,

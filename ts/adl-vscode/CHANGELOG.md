@@ -3,6 +3,10 @@
 All notable changes to the "alexytsu.adl-vscode" extension will be documented in
 this file.
 
+## [0.0.5] - 2025-06-09
+
+- Fix `adl.lspPath` homedir resolution
+
 ## [0.0.4] - 2025-06-09
 
 - Extended VSCode compatibility range to support versions ^1.90.0
