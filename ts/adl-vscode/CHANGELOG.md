@@ -1,11 +1,26 @@
 # Change Log
 
-All notable changes to the "algebraic-data-language" extension will be
-documented in this file.
+All notable changes to the "alexytsu.adl-vscode" extension will be documented in
+this file.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how
-to structure this file.
+## [0.0.4] - 2025-06-09
 
-## [Unreleased]
+- Extended VSCode compatibility range to support versions ^1.90.0
 
-- Initial release
+## [0.0.3] - 2025-06-09
+
+- Added server version compatibility check
+- Added `adl.packageRoots` to specify directories that can be searched to
+  resolve imports
+
+## [0.0.2] - 2025-06-09
+
+- Added support for unresolved import handling
+- Fixed hover functionality
+- Support for reading `adl-lsp` from config path
+
+## [0.0.1] - 2025-06-09
+
+- Initial release with basic LSP functionality
+- Syntax highlighting support
+- Basic language server integration
