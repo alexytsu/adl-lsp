@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockWriteGuard};
 
 use async_lsp::router::Router;
@@ -159,6 +160,60 @@ impl Server {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_imports<F, T>(
+        client: &mut ClientSocket,
+        trees: &mut RwLockWriteGuard<HashMap<Url, ParsedTree>>,
+        documents: &mut RwLockWriteGuard<HashMap<Url, String>>,
+        parser: &mut MutexGuard<AdlParser>,
+        package_roots: &[PathBuf],
+        uri: &Url,
+        unresolved_imports: Vec<UnresolvedImport>,
+        mut process_import: F,
+    ) -> Vec<T>
+    where
+        F: FnMut(&ParsedTree, &str, &str) -> Vec<T>,
+    {
+        let mut results = Vec::new();
+
+        for unresolved_import in unresolved_imports {
+            let possible_import_paths =
+                modules::resolve_import(package_roots, uri, &unresolved_import);
+            let parsed_imports: Vec<Option<(Url, String)>> = possible_import_paths
+                .iter()
+                .map(|uri| {
+                    let contents = std::fs::read_to_string(uri.path()).ok()?;
+                    Some((uri.clone(), contents))
+                })
+                .collect();
+
+            for parsed_import in parsed_imports.into_iter() {
+                if parsed_import.is_none() {
+                    continue;
+                }
+                let (resolved_uri, contents) = parsed_import.unwrap();
+                debug!("Unresolved import: {unresolved_import:?}");
+                debug!("Resolved import: {resolved_uri:?}");
+
+                // Ingest the document if not already ingested
+                Self::ingest_document(
+                    client,
+                    documents,
+                    trees,
+                    parser,
+                    &resolved_uri,
+                    contents.clone(),
+                );
+
+                let imported_tree = trees.get(&resolved_uri).unwrap();
+                let imported_results =
+                    process_import(imported_tree, &unresolved_import.identifier, &contents);
+                results.extend(imported_results);
+            }
+        }
+        results
+    }
+
     pub async fn handle_hover_request(
         &mut self,
         params: HoverParams,
@@ -180,53 +235,29 @@ impl Server {
 
                 // Get definition locations to find imports
                 let definition_locations = tree.definition(identifier, contents);
-                let mut unresolved_imports: Vec<UnresolvedImport> = vec![];
-
-                for definition_location in definition_locations {
-                    if let DefinitionLocation::Import(unresolved_import) = definition_location {
-                        unresolved_imports.push(unresolved_import);
-                    }
-                }
+                let unresolved_imports: Vec<UnresolvedImport> = definition_locations
+                    .into_iter()
+                    .filter_map(|loc| {
+                        if let DefinitionLocation::Import(imp) = loc {
+                            Some(imp)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
                 // Handle imports
-                for unresolved_import in unresolved_imports {
-                    let possible_import_paths = modules::resolve_import(
-                        &self.config.package_roots,
-                        &uri,
-                        &unresolved_import,
-                    );
-                    let parsed_imports: Vec<Option<(Url, String)>> = possible_import_paths
-                        .iter()
-                        .map(|uri| {
-                            let contents = std::fs::read_to_string(uri.path()).ok()?;
-                            Some((uri.clone(), contents))
-                        })
-                        .collect();
-
-                    for parsed_import in parsed_imports.into_iter() {
-                        if parsed_import.is_none() {
-                            continue;
-                        }
-                        let (resolved_uri, contents) = parsed_import.unwrap();
-                        debug!("Unresolved import: {unresolved_import:?}");
-                        debug!("Resolved import: {resolved_uri:?}");
-
-                        // Ingest the document if not already ingested
-                        Self::ingest_document(
-                            &mut self.client,
-                            documents,
-                            trees,
-                            parser,
-                            &resolved_uri,
-                            contents.clone(),
-                        );
-
-                        let imported_tree = trees.get(&resolved_uri).unwrap();
-                        let imported_hover_items =
-                            imported_tree.hover(&unresolved_import.identifier, contents.as_bytes());
-                        hover_items.extend(imported_hover_items);
-                    }
-                }
+                let imported_hover_items = Self::resolve_imports(
+                    &mut self.client,
+                    trees,
+                    documents,
+                    parser,
+                    &self.config.package_roots,
+                    &uri,
+                    unresolved_imports,
+                    |tree, identifier, contents| tree.hover(identifier, contents.as_bytes()),
+                );
+                hover_items.extend(imported_hover_items);
 
                 return Ok(Some(Hover {
                     contents: HoverContents::Array(hover_items),
@@ -259,21 +290,12 @@ impl Server {
             &position,
             documents.get(&uri).unwrap_or(&"".into()).as_bytes(),
         ) {
-            // debug!(
-            //     "found identifier: {} of node_type {:?}",
-            //     identifier,
-            //     node.kind()
-            // );
-
-            // TODO: factor this logic into the ParsedTree impl
             let parent = node.parent();
             if parent.is_none() {
                 return Ok(None);
             }
             let parent = parent.unwrap();
-            // debug!("parent: {:?}", parent.kind());
 
-            // could check if grandparent is struct_definition or union_definition etc.
             if !NodeKind::is_scoped_name(&parent) {
                 return Ok(None);
             }
@@ -302,63 +324,44 @@ impl Server {
 
             // Split into resolved and unresolved imports
             let mut resolved_locations: Vec<Location> = vec![];
-            let mut unresolved_imports: Vec<UnresolvedImport> = vec![];
-            for definition_location in definition_locations {
-                match definition_location {
-                    DefinitionLocation::Resolved(location) => {
+            let unresolved_imports: Vec<UnresolvedImport> = definition_locations
+                .into_iter()
+                .filter_map(|loc| {
+                    if let DefinitionLocation::Resolved(location) = loc {
                         resolved_locations.push(location);
+                        None
+                    } else if let DefinitionLocation::Import(imp) = loc {
+                        Some(imp)
+                    } else {
+                        None
                     }
-                    DefinitionLocation::Import(unresolved_import) => {
-                        unresolved_imports.push(unresolved_import);
-                    }
-                }
-            }
+                })
+                .collect();
 
             // Resolve the unresolved imports
-            for unresolved_import in unresolved_imports {
-                let possible_import_paths =
-                    modules::resolve_import(&self.config.package_roots, &uri, &unresolved_import);
-                let parsed_imports: Vec<Option<(Url, String)>> = possible_import_paths
-                    .iter()
-                    .map(|uri| {
-                        let contents = std::fs::read_to_string(uri.path()).ok()?;
-                        Some((uri.clone(), contents))
-                    })
-                    .collect();
-
-                for parsed_import in parsed_imports.into_iter() {
-                    if parsed_import.is_none() {
-                        continue;
-                    }
-                    let (resolved_uri, contents) = parsed_import.unwrap();
-                    debug!("Unresolved import: {unresolved_import:?}");
-                    debug!("Resolved import: {resolved_uri:?}");
-                    // TODO: check cache before re-ingesting
-                    Self::ingest_document(
-                        &mut self.client,
-                        documents,
-                        trees,
-                        parser,
-                        &resolved_uri,
-                        contents.clone(),
-                    );
-
-                    let imported_tree = trees.get(&resolved_uri).unwrap();
-                    let definition_locations = imported_tree
-                        .definition(&unresolved_import.identifier, contents.as_bytes());
-                    for definition_location in definition_locations {
-                        match definition_location {
-                            DefinitionLocation::Resolved(location) => {
-                                resolved_locations.push(location);
-                            }
-                            DefinitionLocation::Import(_) => {
-                                // no nested imports? perhaps this can technically be supported by a recursive lookup
+            let imported_locations = Self::resolve_imports(
+                &mut self.client,
+                trees,
+                documents,
+                parser,
+                &self.config.package_roots,
+                &uri,
+                unresolved_imports,
+                |tree, identifier, contents| {
+                    tree.definition(identifier, contents.as_bytes())
+                        .into_iter()
+                        .filter_map(|loc| {
+                            if let DefinitionLocation::Resolved(location) = loc {
+                                Some(location)
+                            } else {
                                 error!("import not resolved after one level of resolution");
+                                None
                             }
-                        }
-                    }
-                }
-            }
+                        })
+                        .collect::<Vec<Location>>()
+                },
+            );
+            resolved_locations.extend(imported_locations);
 
             if resolved_locations.is_empty() {
                 return Ok(None);
