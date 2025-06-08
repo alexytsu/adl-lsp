@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "adl-lsp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-lsp",
@@ -946,6 +946,8 @@ dependencies = [
 [[package]]
 name = "tree-sitter-adl"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5780fa10357bff59bdadd61fd2b39ea1ec5fe468e5dc401c75cb7c628e9b6ee"
 dependencies = [
  "cc",
  "tree-sitter-language",
