@@ -2,5 +2,4 @@
 source: src/parser/hover.rs
 expression: body
 ---
-- language: adl
-  value: String body;
+[]

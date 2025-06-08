@@ -68,7 +68,18 @@ impl ParsedTree {
             .find_all_nodes_from(n, NodeKind::is_user_defined_name)
             .into_iter()
             .filter(|n| n.utf8_text(content.as_ref()).expect("utf-8 parse error") == identifier)
-            .filter(Self::is_from_definition)
+            .filter(|n| {
+                let is_from_definition = Self::is_from_definition(n);
+                let is_from_import = Self::is_from_import_declaration(&n).0;
+                if is_from_definition {
+                    debug!(
+                        "is_from_import_definition: {:?}",
+                        n.utf8_text(content.as_ref()).unwrap()
+                    );
+                    debug!("n: {:?}", n.kind());
+                }
+                is_from_import || (is_from_definition && !NodeKind::is_identifier(n))
+            })
             .map(|n| {
                 if let (true, Some(import_node)) = Self::is_from_import_declaration(&n) {
                     DefinitionKind::Import(import_node, identifier.into())
