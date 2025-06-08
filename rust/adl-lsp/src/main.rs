@@ -7,12 +7,15 @@ use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::tracing::TracingLayer;
+use clap::Parser;
 use lsp_types::{notification, request};
 use tower::ServiceBuilder;
-use tracing::Level;
+use tracing::{Level, debug};
 
+use crate::cli::Cli;
 use crate::server::Server;
 
+mod cli;
 mod node;
 mod parser;
 mod server;
@@ -21,6 +24,8 @@ struct TickEvent;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    let cli = Cli::parse();
+
     let (server, _) = async_lsp::MainLoop::new_server(|client| {
         tokio::spawn({
             let client = client.clone();
@@ -35,7 +40,7 @@ async fn main() {
             }
         });
 
-        let mut router: Router<Server> = Server::new(client.clone()).into();
+        let mut router: Router<Server> = Server::new(&client, (&cli).into()).into();
 
         router
             .request::<request::Initialize, _>(|st, params| {
@@ -85,6 +90,8 @@ async fn main() {
         .with_ansi(false)
         .with_writer(std::io::stderr)
         .init();
+
+    debug!("cli: {:?}", cli);
 
     // Prefer truly asynchronous piped stdin/stdout without blocking tasks.
     #[cfg(unix)]

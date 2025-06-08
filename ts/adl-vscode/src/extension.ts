@@ -1,6 +1,7 @@
 import v from "vscode";
 import { ExtensionContext } from "vscode";
 import os from "os";
+import path from "path";
 
 import {
   LanguageClient,
@@ -13,33 +14,57 @@ let client: LanguageClient;
 export function activate(context: ExtensionContext) {
   console.log("ADL Language Server is starting...");
 
-  const adlWorkingDirectories = v.workspace
+  const adlPackageRootsConfig = v.workspace
     .getConfiguration("adl")
-    .get("workingDirectories");
-  let adlRoot: string;
-  if (adlWorkingDirectories instanceof Array) {
-    // TODO: handle multiple working directories
-    adlRoot = adlWorkingDirectories[0];
+    .get("packageRoots");
+
+  let _adlPackageRoots: string[];
+  if (adlPackageRootsConfig instanceof Array) {
+    _adlPackageRoots = adlPackageRootsConfig;
   } else {
-    adlRoot = "adl";
+    _adlPackageRoots = ["adl"];
   }
+
+  const adlPackageRoots = _adlPackageRoots.map((root) => {
+    const relativePath = v.workspace.asRelativePath(root, true);
+
+    // Get the workspace root
+    const workspaceFolders = v.workspace.workspaceFolders;
+    if (!workspaceFolders) {
+      console.error("No workspace folder found");
+      return relativePath;
+    }
+
+    // Construct absolute path using workspace root
+    const workspaceRoot = workspaceFolders[0].uri.fsPath;
+    const absolutePath = path.join(workspaceRoot, relativePath);
+    console.log("absolute package root: ", absolutePath);
+    return absolutePath;
+  });
 
   let adlLspPath: string =
     v.workspace.getConfiguration("adl").get("lspPath") ?? "adl-lsp";
 
+  const adlLspArgs = [
+    "--client",
+    "vscode",
+    "--package-roots",
+    adlPackageRoots.join(","),
+  ];
+
+  // Publish mode
   const run: Executable = {
     command: adlLspPath,
+    args: [...adlLspArgs],
     options: {
-      env: {
-        RUST_LOG: "debug",
-      },
+      cwd: "/Users/alexytsu/Develop/Repositories/adl-lang/adl-lsp/rust/adl-lsp",
     },
   };
 
   // Debug mode
   // const run: Executable = {
   //   command: "cargo",
-  //   args: ["run", "--bin", "adl-lsp", "--", "--adl-root", adlRoot], // TODO: pass working directories as an argument
+  //   args: ["run", "--bin", "adl-lsp", "--", ...adlLspArgs],
   //   options: {
   //     cwd: "/Users/alexytsu/Develop/Repositories/adl-lang/adl-lsp/rust/adl-lsp",
   //   },

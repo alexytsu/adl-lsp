@@ -70,14 +70,7 @@ impl ParsedTree {
             .filter(|n| n.utf8_text(content.as_ref()).expect("utf-8 parse error") == identifier)
             .filter(|n| {
                 let is_from_definition = Self::is_from_definition(n);
-                let is_from_import = Self::is_from_import_declaration(&n).0;
-                if is_from_definition {
-                    debug!(
-                        "is_from_import_definition: {:?}",
-                        n.utf8_text(content.as_ref()).unwrap()
-                    );
-                    debug!("n: {:?}", n.kind());
-                }
+                let is_from_import = Self::is_from_import_declaration(n).0;
                 is_from_import || (is_from_definition && !NodeKind::is_identifier(n))
             })
             .map(|n| {

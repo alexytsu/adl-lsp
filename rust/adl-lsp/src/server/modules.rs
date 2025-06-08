@@ -1,10 +1,16 @@
 use async_lsp::lsp_types::Url;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::debug;
 
 use crate::parser::definition::UnresolvedImport;
 
-pub fn resolve_import(source_uri: &Url, unresolved_import: &UnresolvedImport) -> Option<Url> {
+pub fn resolve_import(
+    package_roots: &[PathBuf],
+    source_uri: &Url,
+    unresolved_import: &UnresolvedImport,
+) -> Vec<Url> {
+    // the source package might not be specified in the roots, we can be lenient of that
+    let mut potential_urls = Vec::with_capacity(package_roots.len() + 1);
     debug!(
         "Resolving import: source={:?}, target_path={:?}, identifier={}",
         source_uri.path(),
@@ -12,30 +18,37 @@ pub fn resolve_import(source_uri: &Url, unresolved_import: &UnresolvedImport) ->
         unresolved_import.identifier
     );
 
-    // TODO: get the adl roots from the `workspace_directories` config 
-    // We can only resolve imports within the same adl location via this technique so all adl files must be colocated
-    // However, to resolve the adl standard library and `sys` modules as well as other modules (such as those from `helix-core`) we'd need
-    // to be aware of other adl roots
-
-    // Get the root of the adl workspace
+    // Get the root of the package that contains the source module
     let source_path = Path::new(source_uri.path());
     let source_module_path: Vec<&str> = unresolved_import.source_module.split(".").collect();
     let source_module_depth = source_module_path.len();
-    let adl_root = source_path
-        .ancestors()
-        .nth(source_module_depth)
-        .unwrap();
-    debug!("ADL root: {:?}", adl_root);
+    let adl_root = source_path.ancestors().nth(source_module_depth).unwrap();
+    debug!("source module ADL-package root: {:?}", adl_root);
 
-    // Resolve module path to file path
-    let target_path = adl_root.join(format!(
+    // NOTE: could send a notification for diagnostics to report if the source module *isn't in the specified workspace roots
+
+    // Prioritise resolving to the source package (most likely here)
+    let source_package_target_path = adl_root.join(format!(
         "{}.adl",
         unresolved_import.target_module_path.join("/")
     ));
+    debug!("resolved path: {:?}", source_package_target_path);
 
-    debug!("Resolved path: {:?}", target_path);
+    potential_urls.push(Url::from_file_path(&source_package_target_path).unwrap());
 
-    Url::from_file_path(target_path).ok()
+    debug!("package_roots: {:?}", package_roots);
+    potential_urls.extend(package_roots.iter().filter_map(|root| {
+        let target_path = root.join(format!(
+            "{}.adl",
+            unresolved_import.target_module_path.join("/")
+        ));
+        if target_path == source_package_target_path {
+            return None;
+        }
+        Url::from_file_path(target_path).ok()
+    }));
+
+    potential_urls.into_iter().collect()
 }
 
 #[cfg(test)]
@@ -44,6 +57,7 @@ mod tests {
 
     #[test]
     fn test_resolve_import_in_shared_module() {
+        let package_roots = vec![PathBuf::from("/project/adl")];
         let source_uri = Url::parse("file:///project/adl/common/main.adl").unwrap();
         let unresolved = UnresolvedImport {
             source_module: "common.main".into(),
@@ -51,15 +65,35 @@ mod tests {
             identifier: "StringML".into(),
         };
 
-        let resolved = resolve_import(&source_uri, &unresolved).unwrap();
+        let resolved = resolve_import(&package_roots, &source_uri, &unresolved);
+        assert_eq!(resolved.len(), 1);
         assert_eq!(
-            resolved,
-            Url::parse("file:///project/adl/common/strings.adl").unwrap(),
+            resolved.first().unwrap(),
+            &Url::parse("file:///project/adl/common/strings.adl").unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_resolve_import_in_same_package_no_root_specified() {
+        let package_roots = vec![];
+        let source_uri = Url::parse("file:///project/adl/common/main.adl").unwrap();
+        let unresolved = UnresolvedImport {
+            source_module: "common.main".into(),
+            target_module_path: vec!["common".into(), "strings".into()],
+            identifier: "StringML".into(),
+        };
+
+        let resolved = resolve_import(&package_roots, &source_uri, &unresolved);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            resolved.first().unwrap(),
+            &Url::parse("file:///project/adl/common/strings.adl").unwrap(),
         );
     }
 
     #[test]
     fn test_resolve_import_in_distinct_module() {
+        let package_roots = vec![PathBuf::from("/project/adl")];
         let source_uri = Url::parse("file:///project/adl/common/main.adl").unwrap();
         let unresolved = UnresolvedImport {
             source_module: "common.main".into(),
@@ -67,15 +101,16 @@ mod tests {
             identifier: "User".into(),
         };
 
-        let resolved = resolve_import(&source_uri, &unresolved).unwrap();
+        let resolved = resolve_import(&package_roots, &source_uri, &unresolved);
         assert_eq!(
-            resolved,
-            Url::parse("file:///project/adl/app/main.adl").unwrap()
+            resolved.first().unwrap(),
+            &Url::parse("file:///project/adl/app/main.adl").unwrap(),
         );
     }
 
     #[test]
     fn test_deeply_nested_import() {
+        let package_roots = vec![PathBuf::from("/project/adl")];
         let source_uri = Url::parse("file:///project/adl/a/b/c/d/e/f/g/module.adl").unwrap();
         let unresolved = UnresolvedImport {
             source_module: "a.b.c.d.e.f.g.module".into(),
@@ -94,15 +129,17 @@ mod tests {
             identifier: "StringML".into(),
         };
 
-        let resolved = resolve_import(&source_uri, &unresolved).unwrap();
+        let resolved = resolve_import(&package_roots, &source_uri, &unresolved);
+        assert_eq!(resolved.len(), 1);
         assert_eq!(
-            resolved,
-            Url::parse("file:///project/adl/a/b/c/d/e/ff/gg/hh/ii/module.adl").unwrap()
+            resolved.first().unwrap(),
+            &Url::parse("file:///project/adl/a/b/c/d/e/ff/gg/hh/ii/module.adl").unwrap(),
         );
     }
 
     #[test]
     fn test_rooted_deep_in_workspace() {
+        let package_roots = vec![PathBuf::from("/project")];
         let source_uri =
             Url::parse("file:///project/a/b/c/d/e/f/g/adl/a/b/c/d/e/f/g/module.adl").unwrap();
         let unresolved = UnresolvedImport {
@@ -122,11 +159,42 @@ mod tests {
             identifier: "StringML".into(),
         };
 
-        let resolved = resolve_import(&source_uri, &unresolved).unwrap();
+        let resolved = resolve_import(&package_roots, &source_uri, &unresolved);
+        assert_eq!(resolved.len(), 1);
         assert_eq!(
-            resolved,
-            Url::parse("file:///project/a/b/c/d/e/f/g/adl/a/b/c/d/e/ff/gg/hh/ii/module.adl")
+            resolved.first().unwrap(),
+            &Url::parse("file:///project/a/b/c/d/e/f/g/adl/a/b/c/d/e/ff/gg/hh/ii/module.adl")
                 .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_multiple_possible_imports() {
+        let package_roots = vec![
+            PathBuf::from("/project/adl2"),
+            PathBuf::from("/another-project/adl"),
+            PathBuf::from("/project/adl"),
+        ];
+        let source_uri = Url::parse("file:///project/adl/common/main.adl").unwrap();
+        let unresolved = UnresolvedImport {
+            source_module: "common.main".into(),
+            target_module_path: vec!["common".into(), "strings".into()],
+            identifier: "StringML".into(),
+        };
+
+        let resolved = resolve_import(&package_roots, &source_uri, &unresolved);
+        assert_eq!(resolved.len(), 3);
+        assert!(resolved.contains(&Url::parse("file:///project/adl/common/strings.adl").unwrap()));
+        assert!(resolved.contains(&Url::parse("file:///project/adl2/common/strings.adl").unwrap()));
+        assert!(
+            resolved
+                .contains(&Url::parse("file:///another-project/adl/common/strings.adl").unwrap())
+        );
+
+        // takes precedence
+        assert_eq!(
+            resolved.first().unwrap(),
+            &Url::parse("file:///project/adl/common/strings.adl").unwrap()
         );
     }
 }

@@ -22,7 +22,7 @@
           "default": "~/.cargo/bin/adl-lsp",
           "description": "Path to the ADL server executable."
         },
-        "adl.workingDirectories": {
+        "adl.packageRoots": {
           "type": "array",
           "items": {
             "type": "string"
@@ -30,7 +30,7 @@
           "default": [
             "adl"
           ],
-          "description": "Working directories where root ADL packages are located"
+          "description": "Root directories where ADL packages are located"
         }
       }
     },

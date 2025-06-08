@@ -22,7 +22,9 @@ use crate::parser::definition::{Definition, DefinitionLocation, UnresolvedImport
 use crate::parser::hover::Hover as HoverTrait;
 use crate::parser::tree::Tree;
 use crate::parser::{AdlParser, ParsedTree};
+use crate::server::config::ServerConfig;
 
+pub mod config;
 mod modules;
 
 #[derive(Default, Clone)]
@@ -37,6 +39,7 @@ struct AdlLanguageServerState {
 pub struct Server {
     client: ClientSocket,
     counter: i32,
+    config: ServerConfig,
     state: AdlLanguageServerState,
 }
 
@@ -47,10 +50,11 @@ impl From<Server> for Router<Server> {
 }
 
 impl Server {
-    pub fn new(client: ClientSocket) -> Self {
+    pub fn new(client: &ClientSocket, config: ServerConfig) -> Self {
         Self {
-            client,
             counter: 0,
+            client: client.clone(),
+            config,
             state: AdlLanguageServerState::default(),
         }
     }
@@ -60,7 +64,7 @@ impl Server {
         documents: &mut RwLockWriteGuard<HashMap<Url, String>>,
         trees: &mut RwLockWriteGuard<HashMap<Url, ParsedTree>>,
         parser: &mut MutexGuard<AdlParser>,
-        uri: Url,
+        uri: &Url,
         contents: String,
     ) {
         debug!("Ingesting document: {uri:?}");
@@ -79,7 +83,7 @@ impl Server {
             trees.insert(uri.clone(), tree);
             // TODO: handle error
             let _ = client.publish_diagnostics(PublishDiagnosticsParams {
-                uri,
+                uri: uri.clone(),
                 diagnostics: d,
                 version: None,
             });
@@ -101,8 +105,6 @@ impl Server {
         &self,
         params: InitializeParams,
     ) -> Result<InitializeResult, ResponseError> {
-        debug!("Initialized with {params:#?}");
-
         let file_operation_filers = vec![FileOperationFilter {
             scheme: Some(String::from("file")),
             pattern: FileOperationPattern {
@@ -188,17 +190,26 @@ impl Server {
 
                 // Handle imports
                 for unresolved_import in unresolved_imports {
-                    if let Some(resolved_uri) = modules::resolve_import(&uri, &unresolved_import) {
-                        debug!("Unresolved import: {unresolved_import:?}");
-                        debug!("Resolved import: {resolved_uri:?}");
+                    let possible_import_paths = modules::resolve_import(
+                        &self.config.package_roots,
+                        &uri,
+                        &unresolved_import,
+                    );
+                    let parsed_imports: Vec<Option<(Url, String)>> = possible_import_paths
+                        .iter()
+                        .map(|uri| {
+                            let contents = std::fs::read_to_string(uri.path()).ok()?;
+                            Some((uri.clone(), contents))
+                        })
+                        .collect();
 
-                        // Read the contents of the resolved uri
-                        let contents = std::fs::read_to_string(resolved_uri.path());
-                        if let Err(e) = contents {
-                            error!("Failed to read contents of {resolved_uri:?}: {e:?}");
+                    for parsed_import in parsed_imports.into_iter() {
+                        if parsed_import.is_none() {
                             continue;
                         }
-                        let contents = contents.unwrap();
+                        let (resolved_uri, contents) = parsed_import.unwrap();
+                        debug!("Unresolved import: {unresolved_import:?}");
+                        debug!("Resolved import: {resolved_uri:?}");
 
                         // Ingest the document if not already ingested
                         Self::ingest_document(
@@ -206,7 +217,7 @@ impl Server {
                             documents,
                             trees,
                             parser,
-                            resolved_uri.clone(),
+                            &resolved_uri,
                             contents.clone(),
                         );
 
@@ -248,11 +259,11 @@ impl Server {
             &position,
             documents.get(&uri).unwrap_or(&"".into()).as_bytes(),
         ) {
-            debug!(
-                "found identifier: {} of node_type {:?}",
-                identifier,
-                node.kind()
-            );
+            // debug!(
+            //     "found identifier: {} of node_type {:?}",
+            //     identifier,
+            //     node.kind()
+            // );
 
             // TODO: factor this logic into the ParsedTree impl
             let parent = node.parent();
@@ -260,7 +271,7 @@ impl Server {
                 return Ok(None);
             }
             let parent = parent.unwrap();
-            debug!("parent: {:?}", parent.kind());
+            // debug!("parent: {:?}", parent.kind());
 
             // could check if grandparent is struct_definition or union_definition etc.
             if !NodeKind::is_scoped_name(&parent) {
@@ -305,24 +316,30 @@ impl Server {
 
             // Resolve the unresolved imports
             for unresolved_import in unresolved_imports {
-                if let Some(resolved_uri) = modules::resolve_import(&uri, &unresolved_import) {
-                    debug!("unresolved import: {unresolved_import:?} resolved to {resolved_uri:?}");
+                let possible_import_paths =
+                    modules::resolve_import(&self.config.package_roots, &uri, &unresolved_import);
+                let parsed_imports: Vec<Option<(Url, String)>> = possible_import_paths
+                    .iter()
+                    .map(|uri| {
+                        let contents = std::fs::read_to_string(uri.path()).ok()?;
+                        Some((uri.clone(), contents))
+                    })
+                    .collect();
 
-                    // read the contents of the resolved uri manually
-                    let contents = std::fs::read_to_string(resolved_uri.path());
-                    if let Err(e) = contents {
-                        error!("Failed to read contents of {resolved_uri:?}: {e:?}");
+                for parsed_import in parsed_imports.into_iter() {
+                    if parsed_import.is_none() {
                         continue;
                     }
-                    let contents = contents.unwrap_or_default();
-
-                    // NOTE: maybe can skip do this if we've already ingested the document
+                    let (resolved_uri, contents) = parsed_import.unwrap();
+                    debug!("Unresolved import: {unresolved_import:?}");
+                    debug!("Resolved import: {resolved_uri:?}");
+                    // TODO: check cache before re-ingesting
                     Self::ingest_document(
                         &mut self.client,
                         documents,
                         trees,
                         parser,
-                        resolved_uri.clone(),
+                        &resolved_uri,
                         contents.clone(),
                     );
 
@@ -379,7 +396,7 @@ impl Server {
             &mut self.state.documents.write().expect("poisoned"),
             &mut self.state.trees.write().expect("poisoned"),
             &mut self.state.parser.lock().expect("poisoned"),
-            uri,
+            &uri,
             contents,
         );
         ControlFlow::Continue(())
@@ -396,7 +413,7 @@ impl Server {
             &mut self.state.documents.write().expect("poisoned"),
             &mut self.state.trees.write().expect("poisoned"),
             &mut self.state.parser.lock().expect("poisoned"),
-            uri,
+            &uri,
             contents,
         );
         ControlFlow::Continue(())

@@ -115,9 +115,9 @@ impl ParsedTree {
         //     .map(|s| s.trim().to_string());
 
         // collect the doccomments preceding the definition
-        let def_text = self.collect_definition_text(&mut cursor.clone(), content.as_ref());
+        let def_text = self._collect_definition_text(&mut cursor.clone(), content.as_ref());
         debug!("found definition text: {:?}", def_text);
-        let doc_comments = self.collect_docstrings(&mut cursor, content.as_ref());
+        let doc_comments = self._collect_docstrings(&mut cursor, content.as_ref());
         debug!("found doccomments: {:?}", doc_comments);
 
         // TODO: collect annotations defined above the definition
@@ -144,7 +144,7 @@ impl ParsedTree {
     }
 
     /// Collects preceding comments and docstrings
-    fn collect_docstrings(
+    fn _collect_docstrings(
         &self,
         cursor: &mut tree_sitter::TreeCursor,
         content: &[u8],
@@ -181,7 +181,7 @@ impl ParsedTree {
     }
 
     /// Collects preceding comments and docstrings
-    fn collect_definition_text(
+    fn _collect_definition_text(
         &self,
         cursor: &mut tree_sitter::TreeCursor,
         content: &[u8],
