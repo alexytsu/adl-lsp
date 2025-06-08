@@ -28,7 +28,7 @@ pub enum DefinitionLocation {
 }
 
 pub trait Definition {
-    fn definition(&self, identifier: &str, conent: impl AsRef<[u8]>) -> Vec<DefinitionLocation>;
+    fn definition(&self, identifier: &str, content: impl AsRef<[u8]>) -> Vec<DefinitionLocation>;
 }
 
 impl Definition for ParsedTree {
@@ -49,18 +49,19 @@ impl ParsedTree {
     ) {
         if identifier.is_empty() {
             return;
-        };
+        }
 
-        // FIXME: make this work for other identifiers too
         let locations: Vec<DefinitionLocation> = self
             .find_all_nodes_from(n, NodeKind::is_identifier)
             .into_iter()
             .filter(|n| n.utf8_text(content.as_ref()).expect("utf-8 parse error") == identifier)
             .filter(|n| Self::is_definition_identifier(n))
-            .map(|n| match Self::is_module_import_identifier(&n) {
-                (true, Some(n)) => DefinitionKind::Import(n, identifier.into()),
-                (false, _) => DefinitionKind::Definition(n),
-                _ => unreachable!(),
+            .map(|n| {
+                if let (true, Some(import_node)) = Self::is_module_import_identifier(&n) {
+                    DefinitionKind::Import(import_node, identifier.into())
+                } else {
+                    DefinitionKind::Definition(n)
+                }
             })
             .map(|n| self.definition_location(n, &content))
             .collect();
@@ -105,44 +106,30 @@ impl ParsedTree {
     }
 
     fn is_definition_identifier(node: &Node<'_>) -> bool {
-        if NodeKind::is_definition(node) {
-            return true;
-        }
-
-        let parent = node.parent();
-        match parent {
-            Some(parent) => Self::is_definition_identifier(&parent),
-            None => false,
-        }
+        NodeKind::is_definition(node)
+            || node
+                .parent()
+                .is_some_and(|p| Self::is_definition_identifier(&p))
     }
 
     fn is_module_import_identifier<'a>(node: &Node<'a>) -> (bool, Option<Node<'a>>) {
         if NodeKind::is_import_declaration(node) {
-            return (true, Some(*node));
-        }
-
-        let parent = node.parent();
-        match parent {
-            Some(parent) => Self::is_module_import_identifier(&parent),
-            None => (false, None),
+            (true, Some(*node))
+        } else {
+            node.parent()
+                .map_or((false, None), |p| Self::is_module_import_identifier(&p))
         }
     }
 
     fn get_source_module(node: &Node<'_>, content: impl AsRef<[u8]>) -> Option<String> {
-        let parent = node.parent();
         if NodeKind::is_module_definition(node) {
-            return Some(
-                node.child(1)? // e.g. [module, common.db]
-                    .utf8_text(content.as_ref())
-                    .unwrap()
-                    .to_string(),
-            );
+            return node
+                .child(1)
+                .and_then(|child| child.utf8_text(content.as_ref()).ok())
+                .map(String::from);
         }
-
-        match parent {
-            Some(parent) => Self::get_source_module(&parent, content),
-            None => None,
-        }
+        node.parent()
+            .and_then(|p| Self::get_source_module(&p, content))
     }
 }
 

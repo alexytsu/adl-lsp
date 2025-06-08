@@ -30,89 +30,186 @@ impl ParsedTree {
             return;
         }
 
-        let hoverable_nodes: Vec<Node> = self
-            .find_all_nodes_from(n, NodeKind::is_user_defined_name)
+        self.find_all_nodes_from(n, NodeKind::is_user_defined_name)
             .into_iter()
-            .filter(|n| {
-                let identifier_node = n.child(0);
-                if let Some(identifier_node) = identifier_node {
-                    identifier_node
-                        .utf8_text(content.as_ref())
-                        .expect("utf-8 parse error")
-                        == identifier
-                } else {
-                    false
-                }
+            .filter_map(|n| {
+                n.child(0)
+                    .and_then(|id_node| id_node.utf8_text(content.as_ref()).ok())
+                    .filter(|text| *text == identifier)
+                    .map(|_| n)
             })
-            .collect();
-
-        debug!("Found hoverable nodes {:?}", hoverable_nodes);
-
-        hoverable_nodes.iter().for_each(|n| {
-            let hover_text = self.get_hover_text(n.id(), content.as_ref());
-            v.extend(hover_text);
-        });
+            .for_each(|n| v.extend(self.get_hover_text(n.id(), content.as_ref())));
     }
 
-    /**
-     * Finds the preceding comments and docstrings for a given node and the text of the node itself
-     */
+    // HACK: since the doccomments are themselves valid ADL and are part of the definition node,
+    // we can just return the entire definition node as the hover text with LanguageString for sensible highlighting
     fn get_hover_text(&self, nid: usize, content: impl AsRef<[u8]>) -> Vec<MarkedString> {
+        let mut results = vec![];
         let root = self.tree.root_node();
         let mut cursor = root.walk();
         Self::advance_cursor_to(&mut cursor, nid);
 
-        debug!("Advanced to node: {:?}", cursor.node());
+        debug!("advanced to node: {:?}", cursor.node());
 
-        // Cursor is now advanced to a user_defined_name
-        if !NodeKind::is_user_defined_name(&cursor.node()) {
-            error!("cursor is not on a user_defined_name");
+        let node = cursor.node();
+        if !NodeKind::is_user_defined_name(&node) {
+            error!(
+                "cursor is not on a user_defined_name: {:?} {:?}",
+                node,
+                node.utf8_text(content.as_ref()).ok()
+            );
             return vec![];
         }
 
-        if !cursor.goto_parent() {
+        let Some(def_node) = cursor.goto_parent().then_some(cursor.node()) else {
             return vec![];
-        }
+        };
 
-        debug!("Found node: {:?}", cursor.node());
-        // Cursor is now advanced from name -> definition or field
-        let definition = cursor.node();
-        let definition_text = definition
+        debug!("found node: {:?}", def_node);
+
+        // find the definition text including doccomments
+        let def_text = def_node
             .utf8_text(content.as_ref())
-            .expect("utf-8 parser error")
-            .trim();
+            .ok()
+            .map(|s| s.trim().to_string());
 
-        cursor.goto_previous_sibling();
+        if let Some(def_text) = def_text {
+            results.push(MarkedString::LanguageString(lsp_types::LanguageString {
+                language: "adl".into(),
+                value: def_text,
+            }));
+        }
 
-        let mut comments = vec![];
-        while NodeKind::is_comment(&cursor.node()) || NodeKind::is_docstring(&cursor.node()) {
+        results
+    }
+
+    // FIXME: hover text parsing is a mess given the current tree-sitter-adl grammar since doccomments are part of the definition node
+    fn _get_hover_text(&self, nid: usize, content: impl AsRef<[u8]>) -> Vec<MarkedString> {
+        let root = self.tree.root_node();
+        let mut cursor = root.walk();
+        Self::advance_cursor_to(&mut cursor, nid);
+
+        debug!("advanced to node: {:?}", cursor.node());
+
+        let node = cursor.node();
+        if !NodeKind::is_user_defined_name(&node) {
+            error!(
+                "cursor is not on a user_defined_name: {:?} {:?}",
+                node,
+                node.utf8_text(content.as_ref()).ok()
+            );
+            return vec![];
+        }
+
+        let Some(def_node) = cursor.goto_parent().then_some(cursor.node()) else {
+            return vec![];
+        };
+
+        debug!("found node: {:?}", def_node);
+
+        // find the definition text including doccomments
+        // let def_text = def_node
+        //     .utf8_text(content.as_ref())
+        //     .ok()
+        //     .map(|s| s.trim().to_string());
+
+        // collect the doccomments preceding the definition
+        let def_text = self.collect_definition_text(&mut cursor.clone(), content.as_ref());
+        debug!("found definition text: {:?}", def_text);
+        let doc_comments = self.collect_docstrings(&mut cursor, content.as_ref());
+        debug!("found doccomments: {:?}", doc_comments);
+
+        // TODO: collect annotations defined above the definition
+        // TODO: collect annotations from separate definitions
+
+        let mut hover_text = vec![];
+
+        if !doc_comments.is_empty() {
+            hover_text.push(MarkedString::String(doc_comments.join("\n")));
+        } else {
+            debug!("no doccomments found for {:?}", def_node);
+        }
+
+        if !def_text.is_empty() {
+            hover_text.push(MarkedString::LanguageString(lsp_types::LanguageString {
+                language: "adl".into(),
+                value: def_text.join("\n"),
+            }));
+        } else {
+            error!("no definition text found for {:?}", def_node);
+        }
+
+        hover_text
+    }
+
+    /// Collects preceding comments and docstrings
+    fn collect_docstrings(
+        &self,
+        cursor: &mut tree_sitter::TreeCursor,
+        content: &[u8],
+    ) -> Vec<String> {
+        // FIXME: the tree-sitter-adl grammar should be changed to support interleaved comments and docstrings
+        // perhaps docstrings should be a sibling of the definition node rather than a child
+        let mut comments = Vec::new();
+
+        if !cursor.goto_first_child() {
+            return comments;
+        };
+
+        let mut node = cursor.node();
+        // seek past docstrings and comments but don't collect comments
+        while NodeKind::is_docstring(&node) || NodeKind::is_comment(&node) {
+            if NodeKind::is_comment(&node) {
+                continue;
+            }
+
+            if let Ok(text) = node.utf8_text(content) {
+                debug!("found docstring: {:?}", text);
+                comments.push(text.trim().trim_start_matches("///").trim().to_string());
+            } else {
+                error!("no comment found for {:?}", node);
+            }
+
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+            node = cursor.node();
+        }
+
+        comments
+    }
+
+    /// Collects preceding comments and docstrings
+    fn collect_definition_text(
+        &self,
+        cursor: &mut tree_sitter::TreeCursor,
+        content: &[u8],
+    ) -> Vec<String> {
+        // FIXME: the tree-sitter-adl grammar should be changed to support interleaved comments and docstrings
+        // perhaps docstrings should be a sibling of the definition node rather than a child
+        let mut definition_text = Vec::new();
+
+        if !cursor.goto_first_child() {
+            return definition_text;
+        };
+
+        loop {
             let node = cursor.node();
-            let text = node
-                .utf8_text(content.as_ref())
-                .expect("utf-8 parser error")
-                .trim()
-                .trim_start_matches("///")
-                .trim_start_matches("//")
-                .trim();
+            if !(NodeKind::is_docstring(&node) || NodeKind::is_comment(&node)) {
+                if let Ok(text) = node.utf8_text(content) {
+                    debug!("found definition text: {:?}", text);
+                    definition_text.push(text.trim().trim_start_matches("///").trim().to_string());
+                } else {
+                    error!("no comment found for {:?}", node);
+                }
+            }
 
-            comments.push(text);
-
-            if !cursor.goto_previous_sibling() {
+            if !cursor.goto_next_sibling() {
                 break;
             }
         }
 
-        let mut hover_text = vec![];
-        if !comments.is_empty() {
-            comments.reverse();
-            hover_text.push(MarkedString::String(comments.join("\n")));
-        }
-        hover_text.push(MarkedString::LanguageString(lsp_types::LanguageString {
-            language: "adl".into(),
-            value: definition_text.into(),
-        }));
-
-        hover_text
+        definition_text
     }
 }
 

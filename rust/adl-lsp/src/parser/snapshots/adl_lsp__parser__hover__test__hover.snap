@@ -3,4 +3,4 @@ source: src/parser/hover.rs
 expression: message
 ---
 - language: adl
-  value: "/// A message is a piece of content that can be sent to a user.\n    struct Message {\n        String title;\n        String body;\n    };"
+  value: "/// A message is a piece of content that can be sent to a user.\n    /// Second line of docstring should be found.\n    // Should skip this comment but still find the above docstring.\n    struct Message {\n        String title;\n        String body;\n    };"
