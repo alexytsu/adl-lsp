@@ -193,6 +193,23 @@ impl Server {
         None
     }
 
+    /// Get document tree and content together, parsing if not already loaded
+    fn get_or_parse_document_with_content(&mut self, uri: &Url) -> Option<(ParsedTree, String)> {
+        // First try to get both atomically from already parsed documents
+        if let Some(result) = self.state.get_document_tree_and_content(uri) {
+            return Some(result);
+        }
+
+        // If not found, try to parse the file
+        if let Ok(content) = std::fs::read_to_string(uri.path()) {
+            debug!("Parsing target document for LSP operation: {}", uri);
+            self.ingest_document(uri, content.clone());
+            return self.state.get_document_tree_and_content(uri);
+        }
+
+        None
+    }
+
     pub async fn handle_hover_request(
         &mut self,
         params: HoverParams,
@@ -200,38 +217,36 @@ impl Server {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        // TODO: get tree and contents in one go
-        if let Some(tree) = self.state.get_document_tree(&uri) {
-            if let Some(contents) = self.state.get_document_content(&uri) {
-                let contents_bytes = contents.as_bytes();
-                if let Some((identifier, _node)) = tree.get_identifier_at(&position, contents_bytes)
-                {
-                    let mut hover_items = tree.hover(identifier, contents_bytes);
+        let Some((tree, contents)) = self.get_or_parse_document_with_content(&uri) else {
+            return Ok(None);
+        };
 
-                    debug!(
-                        "{} has {} hover items locally",
-                        identifier,
-                        hover_items.len()
-                    );
+        let contents_bytes = contents.as_bytes();
+        let Some((identifier, _node)) = tree.get_identifier_at(&position, contents_bytes) else {
+            return Ok(None);
+        };
 
-                    // check imports if no local definition was found
-                    if hover_items.is_empty() {
-                        let imported_hover_items = self
-                            .resolve_import_from_table(identifier, |tree, contents| {
-                                tree.hover(identifier, contents.as_bytes())
-                            });
-                        hover_items.extend(imported_hover_items);
-                    }
+        let mut hover_items = tree.hover(identifier, contents_bytes);
 
-                    return Ok(Some(Hover {
-                        contents: HoverContents::Array(hover_items),
-                        range: None,
-                    }));
-                }
-            }
+        debug!(
+            "{} has {} hover items locally",
+            identifier,
+            hover_items.len()
+        );
+
+        // check imports if no local definition was found
+        if hover_items.is_empty() {
+            let imported_hover_items = self
+                .resolve_import_from_table(identifier, |tree, contents| {
+                    tree.hover(identifier, contents.as_bytes())
+                });
+            hover_items.extend(imported_hover_items);
         }
 
-        Ok(None)
+        Ok(Some(Hover {
+            contents: HoverContents::Array(hover_items),
+            range: None,
+        }))
     }
 
     pub fn handle_goto_definition(
@@ -241,60 +256,46 @@ impl Server {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let tree = self.get_or_parse_document(&uri);
-        if tree.is_none() {
+        let Some((tree, content)) = self.get_or_parse_document_with_content(&uri) else {
+            return Ok(None);
+        };
+
+        let content = content.as_bytes();
+        let Some((identifier, node)) = tree.get_identifier_at(&position, content) else {
+            return Ok(None);
+        };
+
+        // identifiers appearing in scoped names reference a type_definition elsewhere
+        if !NodeKind::has_scoped_name_parent(&node) {
             return Ok(None);
         }
-        let tree = tree.unwrap();
 
-        let contents = self.state.get_document_content(&uri).unwrap_or_default();
-        let contents_bytes = contents.as_bytes();
+        // search for a definition location in the current file
+        let definition_location = tree.definition(identifier, content);
 
-        if let Some((identifier, node)) = tree.get_identifier_at(&position, contents_bytes) {
-            // identifiers appearing in scoped names reference a type_definition elsewhere
-            if !NodeKind::has_scoped_name_parent(&node) {
-                return Ok(None);
+        match definition_location {
+            Some(DefinitionLocation::Resolved(location)) => {
+                debug!("found local definition for {}", identifier);
+                Ok(Some(GotoDefinitionResponse::Scalar(location)))
             }
-
-            // search for a definition location in the current file
-            let definition_location = tree.definition(identifier, contents_bytes);
-
-            // debug!(
-            //     "found definition location: {:?}",
-            //     &definition_location.map(|d| match d {
-            //         DefinitionLocation::Resolved(location) => location.uri.to_string(),
-            //         DefinitionLocation::Import(unresolved_import) =>
-            //             format!("import from {:?}", &unresolved_import.target_module_path),
-            //     })
-            // );
-
-            match definition_location {
-                Some(DefinitionLocation::Resolved(location)) => {
-                    debug!("found local definition for {}", identifier);
-                    Ok(Some(GotoDefinitionResponse::Scalar(location)))
-                }
-                Some(DefinitionLocation::Import(_unresolved_import)) => {
-                    let resolved_import =
-                        self.resolve_import_from_table(identifier, |tree, contents| {
-                            let definition_location =
-                                tree.definition(identifier, contents.as_bytes());
-                            match definition_location {
-                                Some(DefinitionLocation::Resolved(location)) => Some(location),
-                                // if resolved import not found, use _unresolved_import to parse the target document
-                                // however, this shouldn't happen, because we already built the import table when we parsed the source document
-                                Some(DefinitionLocation::Import(_)) | None => {
-                                    error!("import not resolved after lookup in import table");
-                                    None
-                                }
+            Some(DefinitionLocation::Import(_unresolved_import)) => {
+                let resolved_import =
+                    self.resolve_import_from_table(identifier, |tree, contents| {
+                        let definition_location = tree.definition(identifier, contents.as_bytes());
+                        match definition_location {
+                            Some(DefinitionLocation::Resolved(location)) => Some(location),
+                            // if resolved import not found, use _unresolved_import to parse the target document
+                            // however, this shouldn't happen, because we already built the import table when we parsed the source document
+                            Some(DefinitionLocation::Import(_)) | None => {
+                                error!("import not resolved after lookup in import table");
+                                None
                             }
-                        });
+                        }
+                    });
 
-                    Ok(resolved_import.map(GotoDefinitionResponse::Scalar))
-                }
-                None => Ok(None),
+                Ok(resolved_import.map(GotoDefinitionResponse::Scalar))
             }
-        } else {
-            Ok(None)
+            None => Ok(None),
         }
     }
 

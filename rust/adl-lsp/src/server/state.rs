@@ -6,7 +6,7 @@ use lsp_types::{PublishDiagnosticsParams, Url};
 use tracing::debug;
 
 use crate::parser::{AdlParser, ParsedTree};
-use crate::server::imports::{ImportsCache, ImportManager};
+use crate::server::imports::{ImportManager, ImportsCache};
 
 /// ADL Language Server state that manages documents and their parsed trees.
 /// Provides atomic operations to ensure document content and tree are updated together.
@@ -54,7 +54,7 @@ impl AdlLanguageServerState {
             let mut diagnostics = vec![];
             diagnostics.extend(tree.collect_parse_diagnostics());
             trees.insert(uri.clone(), tree.clone());
-            
+
             // Resolve all imports into the imports table
             // This closure can parse documents that aren't already ingested
             let mut get_or_parse_document_tree = |target_uri: &Url| -> Option<ParsedTree> {
@@ -62,11 +62,16 @@ impl AdlLanguageServerState {
                 if let Some(existing_tree) = trees.get(target_uri) {
                     return Some(existing_tree.clone());
                 }
-                
+
                 // If not found, try to parse the file
                 if let Ok(target_content) = std::fs::read_to_string(target_uri.path()) {
-                    debug!("Parsing target document for import resolution: {}", target_uri);
-                    if let Some(parsed_tree) = parser.parse(target_uri.clone(), target_content.as_bytes()) {
+                    debug!(
+                        "Parsing target document for import resolution: {}",
+                        target_uri
+                    );
+                    if let Some(parsed_tree) =
+                        parser.parse(target_uri.clone(), target_content.as_bytes())
+                    {
                         // Store it for future use
                         trees.insert(target_uri.clone(), parsed_tree.clone());
                         documents.insert(target_uri.clone(), target_content);
@@ -75,7 +80,7 @@ impl AdlLanguageServerState {
                 }
                 None
             };
-            
+
             self.import_manager.resolve_document_imports(
                 package_roots,
                 uri,
@@ -83,7 +88,7 @@ impl AdlLanguageServerState {
                 contents.as_bytes(),
                 &mut get_or_parse_document_tree,
             );
-            
+
             // TODO: handle error
             let _ = client.publish_diagnostics(PublishDiagnosticsParams {
                 uri: uri.clone(),
@@ -101,5 +106,16 @@ impl AdlLanguageServerState {
     /// Get a parsed tree for a document if it exists
     pub fn get_document_tree(&self, uri: &Url) -> Option<ParsedTree> {
         self.trees.read().expect("poisoned").get(uri).cloned()
+    }
+
+    /// Atomically get both document content and parsed tree
+    pub fn get_document_tree_and_content(&self, uri: &Url) -> Option<(ParsedTree, String)> {
+        let documents = self.documents.read().expect("poisoned");
+        let trees = self.trees.read().expect("poisoned");
+
+        match (trees.get(uri), documents.get(uri)) {
+            (Some(tree), Some(content)) => Some((tree.clone(), content.clone())),
+            _ => None,
+        }
     }
 }

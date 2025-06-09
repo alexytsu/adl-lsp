@@ -63,17 +63,18 @@ async fn main() {
                 let st = st.clone();
                 async move { st.handle_document_diagnostic_request(params) }
             })
-            .notification::<notification::Initialized>(|_, _| ControlFlow::Continue(()))
-            .notification::<notification::DidChangeConfiguration>(|_, _| ControlFlow::Continue(()))
-            .notification::<notification::DidSaveTextDocument>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::DidOpenTextDocument>(|st, params| {
                 st.handle_did_open_text_document(params)
             })
             .notification::<notification::DidChangeTextDocument>(|st, params| {
                 st.handle_did_change_text_document(params)
             })
-            .notification::<notification::DidCloseTextDocument>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::Exit>(|st, _| st.handle_exit())
+            // TODO: handle these notifications
+            .notification::<notification::Initialized>(|_, _| ControlFlow::Continue(()))
+            .notification::<notification::DidChangeConfiguration>(|_, _| ControlFlow::Continue(()))
+            .notification::<notification::DidSaveTextDocument>(|_, _| ControlFlow::Continue(()))
+            .notification::<notification::DidCloseTextDocument>(|_, _| ControlFlow::Continue(()))
             .event::<TickEvent>(|st, _| st.handle_tick_event());
 
         ServiceBuilder::new()
