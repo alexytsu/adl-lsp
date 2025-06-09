@@ -6,6 +6,7 @@ use lsp_types::{PublishDiagnosticsParams, Url};
 use tracing::debug;
 
 use crate::parser::{AdlParser, ParsedTree};
+use crate::server::imports::{ImportsCache, ImportManager};
 
 /// ADL Language Server state that manages documents and their parsed trees.
 /// Provides atomic operations to ensure document content and tree are updated together.
@@ -13,11 +14,17 @@ use crate::parser::{AdlParser, ParsedTree};
 pub struct AdlLanguageServerState {
     documents: Arc<RwLock<HashMap<Url, String>>>,
     trees: Arc<RwLock<HashMap<Url, ParsedTree>>>,
+    import_manager: ImportsCache,
 }
 
 impl AdlLanguageServerState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Get the target URI for an identifier from the imports table
+    pub fn get_import_target(&self, identifier: &str) -> Option<Url> {
+        self.import_manager.cache().lookup_identifier(identifier)
     }
 
     /// Atomically ingest a document, updating both content and parsed tree together.
@@ -26,12 +33,11 @@ impl AdlLanguageServerState {
         &self,
         client: &mut ClientSocket,
         parser: &mut AdlParser,
+        package_roots: &[std::path::PathBuf],
         uri: &Url,
         contents: String,
     ) {
         debug!("Ingesting document: {uri:?}");
-
-        // TODO: we need to expand all * imports so that GotoDefinition can find them
 
         // Parse the document first
         let parsed_tree = parser.parse(uri.clone(), contents.clone());
@@ -41,13 +47,42 @@ impl AdlLanguageServerState {
         let mut trees = self.trees.write().expect("poisoned");
 
         // Store document contents
-        documents.insert(uri.clone(), contents);
+        documents.insert(uri.clone(), contents.clone());
 
         // Store parsed tree and publish diagnostics
         if let Some(tree) = parsed_tree {
             let mut diagnostics = vec![];
             diagnostics.extend(tree.collect_parse_diagnostics());
-            trees.insert(uri.clone(), tree);
+            trees.insert(uri.clone(), tree.clone());
+            
+            // Resolve all imports into the imports table
+            // This closure can parse documents that aren't already ingested
+            let mut get_or_parse_document_tree = |target_uri: &Url| -> Option<ParsedTree> {
+                // First try to get from already parsed trees
+                if let Some(existing_tree) = trees.get(target_uri) {
+                    return Some(existing_tree.clone());
+                }
+                
+                // If not found, try to parse the file
+                if let Ok(target_content) = std::fs::read_to_string(target_uri.path()) {
+                    debug!("Parsing target document for import resolution: {}", target_uri);
+                    if let Some(parsed_tree) = parser.parse(target_uri.clone(), target_content.as_bytes()) {
+                        // Store it for future use
+                        trees.insert(target_uri.clone(), parsed_tree.clone());
+                        documents.insert(target_uri.clone(), target_content);
+                        return Some(parsed_tree);
+                    }
+                }
+                None
+            };
+            
+            self.import_manager.resolve_document_imports(
+                package_roots,
+                uri,
+                &tree,
+                contents.as_bytes(),
+                &mut get_or_parse_document_tree,
+            );
             
             // TODO: handle error
             let _ = client.publish_diagnostics(PublishDiagnosticsParams {

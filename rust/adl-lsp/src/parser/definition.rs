@@ -122,7 +122,7 @@ impl ParsedTree {
         }
     }
 
-    fn get_source_module(node: &Node<'_>, content: impl AsRef<[u8]>) -> Option<String> {
+    pub fn get_source_module(node: &Node<'_>, content: impl AsRef<[u8]>) -> Option<String> {
         if NodeKind::is_module_definition(node) {
             return node
                 .child(1)

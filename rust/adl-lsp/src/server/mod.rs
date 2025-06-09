@@ -25,6 +25,7 @@ use crate::server::config::ServerConfig;
 use crate::server::state::AdlLanguageServerState;
 
 pub mod config;
+mod imports;
 mod modules;
 mod state;
 
@@ -57,7 +58,7 @@ impl Server {
     fn ingest_document(&mut self, uri: &Url, contents: String) {
         let mut parser = self.parser.lock().expect("poisoned");
         self.state
-            .ingest_document(&mut self.client, &mut parser, uri, contents);
+            .ingest_document(&mut self.client, &mut parser, &self.config.package_roots, uri, contents);
     }
 
     pub async fn handle_shutdown(&self) -> Result<(), ResponseError> {
@@ -134,47 +135,56 @@ impl Server {
         })
     }
 
-    fn resolve_imports<F, T>(
+
+    fn resolve_imports_from_table<F, T>(
         &mut self,
-        uri: &Url,
-        unresolved_imports: Vec<UnresolvedImport>,
+        identifier: &str,
         mut process_import: F,
     ) -> Vec<T>
     where
         F: FnMut(&ParsedTree, &str, &str) -> Vec<T>,
     {
         let mut results = Vec::new();
-
-        for unresolved_import in unresolved_imports {
-            let possible_import_paths =
-                modules::resolve_import(&self.config.package_roots, uri, &unresolved_import);
-            let parsed_imports: Vec<Option<(Url, String)>> = possible_import_paths
-                .iter()
-                .map(|uri| {
-                    let contents = std::fs::read_to_string(uri.path()).ok()?;
-                    Some((uri.clone(), contents))
-                })
-                .collect();
-
-            for parsed_import in parsed_imports.into_iter() {
-                if parsed_import.is_none() {
-                    continue;
-                }
-                let (resolved_uri, contents) = parsed_import.unwrap();
-                debug!("Unresolved import: {unresolved_import:?}");
-                debug!("Resolved import: {resolved_uri:?}");
-
-                // Ingest the document if not already ingested
-                self.ingest_document(&resolved_uri, contents.clone());
-
-                if let Some(imported_tree) = self.state.get_document_tree(&resolved_uri) {
-                    let imported_results =
-                        process_import(&imported_tree, &unresolved_import.identifier, &contents);
+        
+        // Get the target URI for this identifier from the global imports table
+        if let Some(target_uri) = self.state.get_import_target(identifier) {
+            debug!("Resolving import from table: {} -> {}", identifier, target_uri);
+            
+            // Get the target document tree (parse if not already loaded)
+            if let Some(target_tree) = self.get_or_parse_document(&target_uri) {
+                if let Some(target_content) = self.state.get_document_content(&target_uri) {
+                    debug!("Processing import for identifier '{}' in target document", identifier);
+                    let imported_results = process_import(&target_tree, identifier, &target_content);
+                    debug!("Import processing returned {} results", imported_results.len());
                     results.extend(imported_results);
+                } else {
+                    debug!("Could not get content for target document: {}", target_uri);
                 }
+            } else {
+                debug!("Could not parse target document: {}", target_uri);
             }
+        } else {
+            debug!("No import found in table for identifier: {}", identifier);
         }
+        
         results
+    }
+
+    /// Get a document tree, parsing it if not already loaded
+    fn get_or_parse_document(&mut self, uri: &Url) -> Option<ParsedTree> {
+        // First try to get from already parsed trees
+        if let Some(existing_tree) = self.state.get_document_tree(uri) {
+            return Some(existing_tree);
+        }
+        
+        // If not found, try to parse the file
+        if let Ok(content) = std::fs::read_to_string(uri.path()) {
+            debug!("Parsing target document for LSP operation: {}", uri);
+            self.ingest_document(uri, content);
+            return self.state.get_document_tree(uri);
+        }
+        
+        None
     }
 
     pub async fn handle_hover_request(
@@ -195,26 +205,14 @@ impl Server {
                     debug!("Hovering over: {}", identifier);
                     debug!("Found hover items: {:?}", hover_items);
 
-                    // Get definition locations to find imports
-                    let definition_locations = tree.definition(identifier, contents_bytes);
-                    let unresolved_imports: Vec<UnresolvedImport> = definition_locations
-                        .into_iter()
-                        .filter_map(|loc| {
-                            if let DefinitionLocation::Import(imp) = loc {
-                                Some(imp)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    // Handle imports
-                    let imported_hover_items = self.resolve_imports(
-                        &uri,
-                        unresolved_imports,
-                        |tree, identifier, contents| tree.hover(identifier, contents.as_bytes()),
-                    );
-                    hover_items.extend(imported_hover_items);
+                    // Only check imports if no local definition was found
+                    if hover_items.is_empty() {
+                        let imported_hover_items = self.resolve_imports_from_table(
+                            identifier,
+                            |tree, identifier, contents| tree.hover(identifier, contents.as_bytes()),
+                        );
+                        hover_items.extend(imported_hover_items);
+                    }
 
                     return Ok(Some(Hover {
                         contents: HoverContents::Array(hover_items),
@@ -269,13 +267,9 @@ impl Server {
                     .collect::<Vec<String>>()
             );
 
-            if definition_locations.is_empty() {
-                return Ok(None);
-            }
-
             // Split into resolved and unresolved imports
             let mut resolved_locations: Vec<Location> = vec![];
-            let unresolved_imports: Vec<UnresolvedImport> = definition_locations
+            let _unresolved_imports: Vec<UnresolvedImport> = definition_locations
                 .into_iter()
                 .filter_map(|loc| {
                     if let DefinitionLocation::Resolved(location) = loc {
@@ -289,22 +283,26 @@ impl Server {
                 })
                 .collect();
 
-            // Resolve the unresolved imports
-            let imported_locations =
-                self.resolve_imports(&uri, unresolved_imports, |tree, identifier, contents| {
-                    tree.definition(identifier, contents.as_bytes())
-                        .into_iter()
-                        .filter_map(|loc| {
-                            if let DefinitionLocation::Resolved(location) = loc {
-                                Some(location)
-                            } else {
-                                error!("import not resolved after one level of resolution");
-                                None
-                            }
-                        })
-                        .collect::<Vec<Location>>()
-                });
-            resolved_locations.extend(imported_locations);
+            // Only check imports table if no local definition was found
+            if resolved_locations.is_empty() {
+                let imported_locations = self.resolve_imports_from_table(
+                    identifier,
+                    |tree, identifier, contents| {
+                        tree.definition(identifier, contents.as_bytes())
+                            .into_iter()
+                            .filter_map(|loc| {
+                                if let DefinitionLocation::Resolved(location) = loc {
+                                    Some(location)
+                                } else {
+                                    error!("import not resolved after one level of resolution");
+                                    None
+                                }
+                            })
+                            .collect::<Vec<Location>>()
+                    }
+                );
+                resolved_locations.extend(imported_locations);
+            }
 
             if resolved_locations.is_empty() {
                 return Ok(None);
