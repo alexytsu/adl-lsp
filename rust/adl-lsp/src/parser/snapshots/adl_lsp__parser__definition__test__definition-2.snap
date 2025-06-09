@@ -2,12 +2,12 @@
 source: src/parser/definition.rs
 expression: content
 ---
-- Resolved:
-    uri: "file://input/message.adl"
-    range:
-      start:
-        line: 5
-        character: 11
-      end:
-        line: 5
-        character: 18
+Resolved:
+  uri: "file://input/message.adl"
+  range:
+    start:
+      line: 5
+      character: 11
+    end:
+      line: 5
+      character: 18

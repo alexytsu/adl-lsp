@@ -1,0 +1,12 @@
+---
+source: src/parser/references.rs
+expression: content_refs
+---
+- uri: "file://input/message.adl"
+  range:
+    start:
+      line: 12
+      character: 8
+    end:
+      line: 12
+      character: 15

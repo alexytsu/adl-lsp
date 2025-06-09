@@ -51,21 +51,22 @@ pub enum NodeKind {
 
 impl NodeKind {
     pub fn is_user_defined_name(n: &Node) -> bool {
-        Self::is_identifier(n)
-            || Self::is_type_name(n)
-            || Self::is_scoped_name(n)
+        Self::is_identifier(n) || Self::is_type_name(n) || Self::is_scoped_name(n)
     }
 
     pub fn is_definition(n: &Node) -> bool {
-        Self::is_import_declaration(n)
-            || Self::is_type_name(n)
-            || Self::is_import_declaration(n)
+        Self::is_import_declaration(n) || Self::is_type_name(n) || Self::is_import_declaration(n)
     }
 
+    /// Check if an identifier is part of a scoped name
     pub fn has_scoped_name_parent(n: &Node) -> bool {
-        n.parent()
-            .map(|parent| Self::is_scoped_name(&parent))
-            .unwrap_or(false)
+        Self::is_identifier(n) && n.parent().is_some_and(|p| Self::is_scoped_name(&p))
+    }
+
+    /// Check if a node represents a valid identifier definition that can be referenced
+    /// (i.e., an identifier that is part of a type_name)
+    pub fn can_be_referenced(n: &Node) -> bool {
+        Self::is_identifier(n) && n.parent().is_some_and(|p| Self::is_type_name(&p))
     }
 }
 

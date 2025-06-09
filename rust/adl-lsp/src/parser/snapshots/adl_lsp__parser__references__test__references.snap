@@ -1,0 +1,5 @@
+---
+source: src/parser/references.rs
+expression: message_refs
+---
+[]

@@ -28,7 +28,6 @@ pub struct ImportsCache {
 }
 
 impl ImportsCache {
-
     /// Attempt to lookup the uri where an identifier is defined
     pub fn lookup_identifier(&self, identifier: &str) -> Option<Url> {
         self.definition_locations
@@ -36,6 +35,21 @@ impl ImportsCache {
             .expect("poisoned")
             .get(identifier)
             .cloned()
+    }
+
+    /// Get all files that import a specific identifier
+    pub fn get_files_importing_identifier(&self, identifier: &str) -> Vec<Url> {
+        let imported_symbols = self.imported_symbols.read().expect("poisoned");
+        imported_symbols
+            .iter()
+            .filter_map(|(uri, symbols)| {
+                if symbols.contains(identifier) {
+                    Some(uri.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Add a validated import to the table, registering its import and definition
@@ -162,14 +176,13 @@ impl ImportManager for ImportsCache {
 }
 
 impl ImportsCache {
-
     /// Register all type definitions in a document
     fn register_document_definitions(&self, source_uri: &Url, tree: &ParsedTree, content: &[u8]) {
         debug!("Registering definitions for document: {}", source_uri);
-        
+
         // Find all type definitions in this document
         let type_definitions = self.find_type_definitions(tree, content);
-        
+
         // Register each definition in the cache
         for definition in type_definitions {
             self.add_definition(source_uri, &definition);

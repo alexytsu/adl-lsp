@@ -2,4 +2,4 @@
 source: src/parser/definition.rs
 expression: string
 ---
-[]
+~

@@ -27,6 +27,13 @@ impl AdlLanguageServerState {
         self.import_manager.cache().lookup_identifier(identifier)
     }
 
+    /// Get all files that import a specific identifier
+    pub fn get_files_importing_identifier(&self, identifier: &str) -> Vec<Url> {
+        self.import_manager
+            .cache()
+            .get_files_importing_identifier(identifier)
+    }
+
     /// Atomically ingest a document, updating both content and parsed tree together.
     /// This ensures consistency between the document content and its AST representation.
     pub fn ingest_document(

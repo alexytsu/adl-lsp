@@ -59,6 +59,10 @@ async fn main() {
                 let mut st = st.clone();
                 async move { st.handle_goto_definition(params) }
             })
+            .request::<request::References, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_find_references(params) }
+            })
             .request::<request::DocumentDiagnosticRequest, _>(|st, params| {
                 let st = st.clone();
                 async move { st.handle_document_diagnostic_request(params) }

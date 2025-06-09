@@ -3,10 +3,11 @@ use std::sync::Arc;
 use tree_sitter::Tree;
 
 pub mod definition;
+pub mod diagnostics;
 pub mod hover;
+pub mod references;
 pub mod tree;
 pub mod ts_lsp_interop;
-pub mod diagnostics;
 
 pub struct AdlParser {
     parser: tree_sitter::Parser,

@@ -9,8 +9,8 @@ use lsp_types::{
     DocumentDiagnosticReportResult, FileOperationFilter, FileOperationPattern,
     FileOperationPatternKind, FileOperationRegistrationOptions, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, OneOf, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    InitializeParams, InitializeResult, Location, OneOf, ReferenceParams, ServerCapabilities,
+    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions,
     WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
 };
@@ -19,6 +19,7 @@ use tracing::{debug, error};
 use crate::node::NodeKind;
 use crate::parser::definition::{Definition, DefinitionLocation};
 use crate::parser::hover::Hover as HoverTrait;
+use crate::parser::references::References;
 use crate::parser::{AdlParser, ParsedTree};
 use crate::server::config::ServerConfig;
 use crate::server::state::AdlLanguageServerState;
@@ -107,6 +108,7 @@ impl Server {
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
                     DiagnosticOptions {
                         inter_file_dependencies: false,
@@ -296,6 +298,88 @@ impl Server {
                 Ok(resolved_import.map(GotoDefinitionResponse::Scalar))
             }
             None => Ok(None),
+        }
+    }
+
+    pub fn handle_find_references(
+        &mut self,
+        params: ReferenceParams,
+    ) -> Result<Option<Vec<Location>>, ResponseError> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let Some((tree, contents)) = self.get_or_parse_document_with_content(&uri) else {
+            return Ok(None);
+        };
+
+        let contents_bytes = contents.as_bytes();
+        let Some((identifier, node)) = tree.get_identifier_at(&position, contents_bytes) else {
+            return Ok(None);
+        };
+
+        if !NodeKind::can_be_referenced(&node) {
+            return Ok(None);
+        }
+
+        debug!("finding references for identifier: {}", identifier);
+
+        let mut all_references = Vec::new();
+
+        // First, find references in the current file
+        let local_references = tree.find_references(identifier, contents_bytes);
+        all_references.extend(local_references);
+
+        // Then, find all files that import this identifier
+        let importing_files = self.state.get_files_importing_identifier(identifier);
+        debug!(
+            "found {} files importing identifier '{}'",
+            importing_files.len(),
+            identifier
+        );
+
+        // Parse each importing file and find references
+        for importing_file_uri in importing_files {
+            if importing_file_uri == uri {
+                // Skip the current file, already processed above
+                continue;
+            }
+
+            debug!(
+                "checking for references in importing file: {}",
+                importing_file_uri
+            );
+
+            // Get or parse the importing file
+            if let Some(importing_tree) = self.get_or_parse_document(&importing_file_uri) {
+                if let Some(importing_content) =
+                    self.state.get_document_content(&importing_file_uri)
+                {
+                    let imported_references =
+                        importing_tree.find_references(identifier, importing_content.as_bytes());
+                    debug!(
+                        "Found {} references in file {}",
+                        imported_references.len(),
+                        importing_file_uri
+                    );
+                    all_references.extend(imported_references);
+                }
+            }
+        }
+
+        // Include definition if requested
+        if params.context.include_declaration {
+            let definition_location = tree.definition(identifier, contents_bytes);
+            if let Some(DefinitionLocation::Resolved(location)) = definition_location {
+                all_references.push(location);
+            }
+        }
+
+        debug!("Total references found: {}", all_references.len());
+
+        if all_references.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(all_references))
         }
     }
 
