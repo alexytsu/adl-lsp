@@ -4,7 +4,7 @@
   "description": "LSP support for Algebraic Data Language",
   "repository": "https://github.com/alexytsu/adl-lsp",
   "publisher": "alexytsu",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "engines": {
     "vscode": "^1.90.0"
   },
