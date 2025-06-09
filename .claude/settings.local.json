@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo:*)",
+      "Bash(ls:*)",
+      "Bash(RUST_LOG=debug cargo test:*)",
+      "Bash(RUST_BACKTRACE=1 cargo test:*)",
+      "Bash(find:*)"
+    ],
+    "deny": []
+  }
+}
