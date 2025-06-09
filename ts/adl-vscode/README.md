@@ -37,7 +37,11 @@ This extension contributes the following settings:
 - `adl.packageRoots`: ADL package locations. An ADL package is the directory
   that contains top-level ADL modules.
 
-## Publishing
+## Publishing checklist
 
-- Update the [changelog](./CHANGELOG.md) and version number in `package.json`
+- Update the version number in `package.json`
+- Update the [changelog](./CHANGELOG.md)
+- Update the minimum `adl-lsp` version number in
+  [check-version.ts](./src/check-version.ts) if necessary
 - `vsce publish`
+- `git tag -a -f -m "adl-vscode-${SEMVER}" adl-vscode-${SEMVER}`

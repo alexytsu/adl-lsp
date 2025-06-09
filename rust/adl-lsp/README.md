@@ -26,3 +26,10 @@ cargo test
 ## License
 
 MIT License
+
+## Publishing checklist
+
+- Update the version number in `Cargo.toml`
+- Release a new version of `adl-vscode` with a new minimum `adl-lsp` version requirement if necessary
+- `cargo publish`
+- `git tag -a -f -m "adl-lsp-${SEMVER}" adl-lsp-${SEMVER}`
