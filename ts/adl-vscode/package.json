@@ -38,7 +38,12 @@
       {
         "id": "adl",
         "extensions": [
-          ".adl"
+          ".adl",
+          ".adl-cpp",
+          ".adl-hs",
+          ".adl-java",
+          ".adl-rs",
+          ".adl-ts"
         ],
         "aliases": [
           "ADL",

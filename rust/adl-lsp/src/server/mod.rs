@@ -1,4 +1,5 @@
 use std::ops::ControlFlow;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_lsp::router::Router;
@@ -66,19 +67,93 @@ impl Server {
         );
     }
 
+    /// Initialize the server by discovering and processing all ADL files in package roots
+    pub fn initialize_workspace(&mut self) {
+        debug!("initializing workspace by discovering ADL files in package roots");
+
+        let adl_files = self.discover_adl_files();
+        debug!("found {} ADL files to preprocess", adl_files.len());
+
+        for file_path in &adl_files {
+            if let Ok(uri) = Url::from_file_path(file_path) {
+                if let Ok(contents) = std::fs::read_to_string(file_path) {
+                    debug!("preprocessing ADL file: {}", uri);
+                    self.ingest_document(&uri, contents);
+                } else {
+                    error!("failed to read file: {}", file_path.display());
+                }
+            } else {
+                error!("failed to convert path to URI: {}", file_path.display());
+            }
+        }
+
+        debug!("workspace initialization complete");
+        debug!("files processed: {}", &adl_files.len());
+    }
+
+    /// Discover all .adl files in the configured package roots
+    fn discover_adl_files(&self) -> Vec<PathBuf> {
+        let mut adl_files = Vec::new();
+
+        for package_root in &self.config.package_roots {
+            debug!(
+                "discovering ADL files in package root: {}",
+                package_root.display()
+            );
+
+            if package_root.exists() && package_root.is_dir() {
+                Self::discover_adl_files_recursive(package_root, &mut adl_files);
+            } else {
+                debug!(
+                    "package root does not exist or is not a directory: {}",
+                    package_root.display()
+                );
+            }
+        }
+
+        debug!("total ADL files discovered: {}", adl_files.len());
+        adl_files
+    }
+
+    /// Recursively discover .adl files in a directory
+    fn discover_adl_files_recursive(dir: &PathBuf, adl_files: &mut Vec<PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+
+                if path.is_dir() {
+                    // Skip hidden directories and common build/output directories
+                    if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                        if !dir_name.starts_with('.')
+                            && dir_name != "target"
+                            && dir_name != "node_modules"
+                            && dir_name != "dist"
+                            && dir_name != "build"
+                        {
+                            Self::discover_adl_files_recursive(&path, adl_files);
+                        }
+                    }
+                } else if path.extension().and_then(|ext| ext.to_str()) == Some("adl") {
+                    debug!("Found ADL file: {}", path.display());
+                    adl_files.push(path);
+                }
+            }
+        }
+    }
+
     pub async fn handle_shutdown(&self) -> Result<(), ResponseError> {
         // TODO: cleanup? after shutdown, should respond with InvalidRequest to all other requests
-        debug!("Shutting down server");
+        debug!("shutting down server");
         Ok(())
     }
 
     pub fn handle_exit(&self) -> ControlFlow<Result<(), Error>> {
-        debug!("Exiting server");
+        debug!("exiting server");
         std::process::exit(0);
     }
 
     pub async fn handle_initialize(
-        &self,
+        &mut self,
         _params: InitializeParams,
     ) -> Result<InitializeResult, ResponseError> {
         let file_operation_filers = vec![FileOperationFilter {
@@ -94,7 +169,7 @@ impl Server {
             filters: file_operation_filers,
         };
 
-        Ok(InitializeResult {
+        let result = InitializeResult {
             // TODO: fine-tune these capabilities
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -138,7 +213,14 @@ impl Server {
                     version: Some(String::from(env!("CARGO_PKG_VERSION"))),
                 }
             }),
-        })
+        };
+
+        // Initialize workspace by discovering and processing all ADL files
+        debug!("starting workspace initialization during LSP initialize");
+        self.initialize_workspace();
+        debug!("workspace initialization completed during LSP initialize");
+
+        Ok(result)
     }
 
     fn resolve_import_from_table<F, T: Default>(

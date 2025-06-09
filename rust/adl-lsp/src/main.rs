@@ -44,7 +44,7 @@ async fn main() {
 
         router
             .request::<request::Initialize, _>(|st, params| {
-                let st = st.clone();
+                let mut st = st.clone();
                 async move { st.handle_initialize(params).await }
             })
             .request::<request::Shutdown, _>(|st, _| {
