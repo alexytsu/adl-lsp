@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "adl-lsp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-lsp",

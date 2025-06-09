@@ -22,16 +22,17 @@ When paired with the VSCode extension you will be provided
 
 - ✅ Syntax highlighting (by [guyNeara](https://github.com/guyNeara) from
   [adl-vscode-highlight](https://github.com/adl-lang/adl-vscode-highlight))
-- ✅ Go to definition
+- ✅ Goto definition and goto references
 - ✅ Diagnostics
 - ✅ Hover information
-- ✅ Code completion
-- ✅ Formatting
 
 Further planned features
 
 - 🚧 Symbol renaming
 - 🚧 Import management
+- 🚧 Code completion and suggestions
+- 🚧 Formatting
+- 🚧 Style and linting rules
 - 🚧 Type-checking of interior JSON values
 - 🚧 Plugins for other editors (neovim, helix)
 

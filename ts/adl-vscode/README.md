@@ -8,18 +8,18 @@ This provides Language Server Protocol client capabilities integrated with
 
 - ✅ Syntax highlighting (by [guyNeara](https://github.com/guyNeara) from
   [adl-vscode-highlight](https://github.com/adl-lang/adl-vscode-highlight))
-- ✅ Go to definition
+- ✅ Goto definition and goto references
 - ✅ Diagnostics
 - ✅ Hover information
 
 Further planned features
 
-- 🚧 Code completion
-- 🚧 Formatting
 - 🚧 Symbol renaming
 - 🚧 Import management
+- 🚧 Code completion and suggestions
+- 🚧 Formatting
+- 🚧 Style and linting rules
 - 🚧 Type-checking of interior JSON values
-- 🚧 Plugins for other editors (neovim, helix)
 
 [CHANGELOG](https://marketplace.visualstudio.com/items/alexytsu.adl-vscode/changelog)
 

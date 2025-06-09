@@ -3,6 +3,11 @@
 All notable changes to the "alexytsu.adl-vscode" extension will be documented in
 this file.
 
+## [0.1.0] - 2025-06-11
+
+- Implement goto references via `adl-lsp@0.5.0`
+- Add support for language specific annotation files (e.g. module.adl-rs)
+
 ## [0.0.6] - 2025-06-10
 
 - Resolve star-style imports via `adl-lsp@0.4.0`
