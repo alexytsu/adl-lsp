@@ -61,6 +61,12 @@ impl NodeKind {
             || Self::is_type_name(n)
             || Self::is_import_declaration(n)
     }
+
+    pub fn has_scoped_name_parent(n: &Node) -> bool {
+        n.parent()
+            .map(|parent| Self::is_scoped_name(&parent))
+            .unwrap_or(false)
+    }
 }
 
 impl NodeKind {

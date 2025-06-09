@@ -4,6 +4,7 @@ use tree_sitter::{Node, TreeCursor};
 use crate::parser::ts_lsp_interop as ts_lsp;
 use crate::{node::NodeKind, parser::ParsedTree};
 
+/// Basic tree traversal methods for working with the tree-sitter parsed tree
 pub trait Tree {
     fn advance_cursor_to(cursor: &mut TreeCursor<'_>, nid: usize) -> bool;
     fn find_all_nodes_from<'a>(&self, n: Node<'a>, f: fn(&Node) -> bool) -> Vec<Node<'a>>;
@@ -12,12 +13,6 @@ pub trait Tree {
         f: fn(&Node) -> bool,
         early: bool,
     ) -> Vec<Node<'a>>;
-    fn get_user_defined_text<'a>(
-        &'a self,
-        pos: &Position,
-        content: &'a [u8],
-    ) -> Option<(&'a str, Node<'a>)>;
-    fn get_user_defined_node<'a>(&'a self, pos: &Position) -> Option<Node<'a>>;
     fn get_node_at_position<'a>(&'a self, pos: &Position) -> Option<Node<'a>>;
     #[allow(dead_code)]
     fn find_all_nodes(&self, f: fn(&Node) -> bool) -> Vec<Node>;
@@ -74,20 +69,6 @@ impl Tree for ParsedTree {
         }
     }
 
-    fn get_user_defined_text<'a>(
-        &'a self,
-        pos: &Position,
-        content: &'a [u8],
-    ) -> Option<(&'a str, Node<'a>)> {
-        self.get_user_defined_node(pos)
-            .map(|n| (n.utf8_text(content.as_ref()).expect("utf-8 parse error"), n))
-    }
-
-    fn get_user_defined_node<'a>(&'a self, pos: &Position) -> Option<Node<'a>> {
-        self.get_node_at_position(pos)
-            .filter(|n| NodeKind::is_identifier(n))
-    }
-
     fn get_node_at_position<'a>(&'a self, pos: &Position) -> Option<Node<'a>> {
         let pos = ts_lsp::lsp_to_ts_point(pos);
         self.tree.root_node().descendant_for_point_range(pos, pos)
@@ -109,5 +90,17 @@ impl Tree for ParsedTree {
     fn find_node_from<'a>(&self, n: Node<'a>, f: fn(&Node) -> bool) -> Vec<Node<'a>> {
         let mut cursor = n.walk();
         Self::walk_and_filter(&mut cursor, f, true)
+    }
+}
+
+impl ParsedTree {
+    pub fn get_identifier_at<'a>(
+        &'a self,
+        pos: &Position,
+        content: &'a [u8],
+    ) -> Option<(&'a str, Node<'a>)> {
+        self.get_node_at_position(pos)
+            .filter(NodeKind::is_identifier)
+            .map(|n| (n.utf8_text(content.as_ref()).expect("utf-8 parse error"), n))
     }
 }

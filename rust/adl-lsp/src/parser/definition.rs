@@ -8,34 +8,37 @@ use crate::parser::ParsedTree;
 use crate::parser::tree::Tree;
 use crate::parser::ts_lsp_interop;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum DefinitionKind<'a> {
     Definition(Node<'a>),
     Import(Node<'a>, String),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UnresolvedImport {
     pub source_module: String,
     pub target_module_path: Vec<String>,
     pub identifier: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum DefinitionLocation {
     Resolved(Location),
     Import(UnresolvedImport),
 }
 
 pub trait Definition {
-    fn definition(&self, identifier: &str, content: impl AsRef<[u8]>) -> Vec<DefinitionLocation>;
+    fn definition(&self, identifier: &str, content: impl AsRef<[u8]>)
+    -> Option<DefinitionLocation>;
 }
 
 impl Definition for ParsedTree {
-    fn definition(&self, identifier: &str, content: impl AsRef<[u8]>) -> Vec<DefinitionLocation> {
-        let mut results = vec![];
-        self.definition_impl(identifier, self.tree.root_node(), &mut results, content);
-        results
+    fn definition(
+        &self,
+        identifier: &str,
+        content: impl AsRef<[u8]>,
+    ) -> Option<DefinitionLocation> {
+        self.definition_impl(identifier, self.tree.root_node(), content)
     }
 }
 
@@ -57,11 +60,10 @@ impl ParsedTree {
         &self,
         identifier: &str,
         n: Node,
-        v: &mut Vec<DefinitionLocation>,
         content: impl AsRef<[u8]>,
-    ) {
+    ) -> Option<DefinitionLocation> {
         if identifier.is_empty() {
-            return;
+            return None;
         }
 
         let locations: Vec<DefinitionLocation> = self
@@ -83,7 +85,7 @@ impl ParsedTree {
             .map(|n| self.definition_location(n, &content))
             .collect();
 
-        v.extend(locations);
+        locations.first().cloned()
     }
 
     fn definition_location(

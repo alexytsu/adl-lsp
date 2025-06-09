@@ -9,7 +9,7 @@ use lsp_types::{
     DocumentDiagnosticReportResult, FileOperationFilter, FileOperationPattern,
     FileOperationPatternKind, FileOperationRegistrationOptions, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, OneOf, ServerCapabilities, ServerInfo,
+    InitializeParams, InitializeResult, OneOf, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions,
     WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
@@ -17,9 +17,8 @@ use lsp_types::{
 use tracing::{debug, error};
 
 use crate::node::NodeKind;
-use crate::parser::definition::{Definition, DefinitionLocation, UnresolvedImport};
+use crate::parser::definition::{Definition, DefinitionLocation};
 use crate::parser::hover::Hover as HoverTrait;
-use crate::parser::tree::Tree;
 use crate::parser::{AdlParser, ParsedTree};
 use crate::server::config::ServerConfig;
 use crate::server::state::AdlLanguageServerState;
@@ -57,8 +56,13 @@ impl Server {
 
     fn ingest_document(&mut self, uri: &Url, contents: String) {
         let mut parser = self.parser.lock().expect("poisoned");
-        self.state
-            .ingest_document(&mut self.client, &mut parser, &self.config.package_roots, uri, contents);
+        self.state.ingest_document(
+            &mut self.client,
+            &mut parser,
+            &self.config.package_roots,
+            uri,
+            contents,
+        );
     }
 
     pub async fn handle_shutdown(&self) -> Result<(), ResponseError> {
@@ -135,39 +139,41 @@ impl Server {
         })
     }
 
-
-    fn resolve_imports_from_table<F, T>(
+    fn resolve_import_from_table<F, T: Default>(
         &mut self,
         identifier: &str,
         mut process_import: F,
-    ) -> Vec<T>
+    ) -> T
     where
-        F: FnMut(&ParsedTree, &str, &str) -> Vec<T>,
+        F: FnMut(&ParsedTree, &str) -> T,
     {
-        let mut results = Vec::new();
-        
-        // Get the target URI for this identifier from the global imports table
+        // get the target URI for this identifier from the global imports table
         if let Some(target_uri) = self.state.get_import_target(identifier) {
-            debug!("Resolving import from table: {} -> {}", identifier, target_uri);
-            
+            debug!(
+                "resolving import target location: {} -> {}",
+                identifier,
+                target_uri.path()
+            );
+
             // Get the target document tree (parse if not already loaded)
             if let Some(target_tree) = self.get_or_parse_document(&target_uri) {
                 if let Some(target_content) = self.state.get_document_content(&target_uri) {
-                    debug!("Processing import for identifier '{}' in target document", identifier);
-                    let imported_results = process_import(&target_tree, identifier, &target_content);
-                    debug!("Import processing returned {} results", imported_results.len());
-                    results.extend(imported_results);
+                    debug!(
+                        "processing import for identifier '{}' in target document",
+                        identifier
+                    );
+                    return process_import(&target_tree, &target_content);
                 } else {
-                    debug!("Could not get content for target document: {}", target_uri);
+                    error!("could not get content for target document: {}", target_uri);
                 }
             } else {
-                debug!("Could not parse target document: {}", target_uri);
+                error!("could not parse target document: {}", target_uri);
             }
         } else {
-            debug!("No import found in table for identifier: {}", identifier);
+            error!("no import found in table for identifier: {}", identifier);
         }
-        
-        results
+
+        T::default()
     }
 
     /// Get a document tree, parsing it if not already loaded
@@ -176,14 +182,14 @@ impl Server {
         if let Some(existing_tree) = self.state.get_document_tree(uri) {
             return Some(existing_tree);
         }
-        
+
         // If not found, try to parse the file
         if let Ok(content) = std::fs::read_to_string(uri.path()) {
             debug!("Parsing target document for LSP operation: {}", uri);
             self.ingest_document(uri, content);
             return self.state.get_document_tree(uri);
         }
-        
+
         None
     }
 
@@ -194,23 +200,26 @@ impl Server {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
+        // TODO: get tree and contents in one go
         if let Some(tree) = self.state.get_document_tree(&uri) {
             if let Some(contents) = self.state.get_document_content(&uri) {
                 let contents_bytes = contents.as_bytes();
-                if let Some((identifier, _node)) =
-                    tree.get_user_defined_text(&position, contents_bytes)
+                if let Some((identifier, _node)) = tree.get_identifier_at(&position, contents_bytes)
                 {
                     let mut hover_items = tree.hover(identifier, contents_bytes);
 
-                    debug!("Hovering over: {}", identifier);
-                    debug!("Found hover items: {:?}", hover_items);
+                    debug!(
+                        "{} has {} hover items locally",
+                        identifier,
+                        hover_items.len()
+                    );
 
-                    // Only check imports if no local definition was found
+                    // check imports if no local definition was found
                     if hover_items.is_empty() {
-                        let imported_hover_items = self.resolve_imports_from_table(
-                            identifier,
-                            |tree, identifier, contents| tree.hover(identifier, contents.as_bytes()),
-                        );
+                        let imported_hover_items = self
+                            .resolve_import_from_table(identifier, |tree, contents| {
+                                tree.hover(identifier, contents.as_bytes())
+                            });
                         hover_items.extend(imported_hover_items);
                     }
 
@@ -232,7 +241,7 @@ impl Server {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let tree = self.state.get_document_tree(&uri);
+        let tree = self.get_or_parse_document(&uri);
         if tree.is_none() {
             return Ok(None);
         }
@@ -241,74 +250,49 @@ impl Server {
         let contents = self.state.get_document_content(&uri).unwrap_or_default();
         let contents_bytes = contents.as_bytes();
 
-        if let Some((identifier, node)) = tree.get_user_defined_text(&position, contents_bytes) {
-            let parent = node.parent();
-            if parent.is_none() {
-                return Ok(None);
-            }
-            let parent = parent.unwrap();
-
-            if !NodeKind::is_scoped_name(&parent) {
+        if let Some((identifier, node)) = tree.get_identifier_at(&position, contents_bytes) {
+            // identifiers appearing in scoped names reference a type_definition elsewhere
+            if !NodeKind::has_scoped_name_parent(&node) {
                 return Ok(None);
             }
 
-            // Find all definition locations for this identifier in the current file
-            let definition_locations = tree.definition(identifier, contents_bytes);
+            // search for a definition location in the current file
+            let definition_location = tree.definition(identifier, contents_bytes);
 
-            debug!(
-                "found definition locations: {:?}",
-                &definition_locations
-                    .iter()
-                    .map(|d| match d {
-                        DefinitionLocation::Resolved(location) => location.uri.to_string(),
-                        DefinitionLocation::Import(unresolved_import) =>
-                            format!("import from {:?}", unresolved_import.target_module_path),
-                    })
-                    .collect::<Vec<String>>()
-            );
+            // debug!(
+            //     "found definition location: {:?}",
+            //     &definition_location.map(|d| match d {
+            //         DefinitionLocation::Resolved(location) => location.uri.to_string(),
+            //         DefinitionLocation::Import(unresolved_import) =>
+            //             format!("import from {:?}", &unresolved_import.target_module_path),
+            //     })
+            // );
 
-            // Split into resolved and unresolved imports
-            let mut resolved_locations: Vec<Location> = vec![];
-            let _unresolved_imports: Vec<UnresolvedImport> = definition_locations
-                .into_iter()
-                .filter_map(|loc| {
-                    if let DefinitionLocation::Resolved(location) = loc {
-                        resolved_locations.push(location);
-                        None
-                    } else if let DefinitionLocation::Import(imp) = loc {
-                        Some(imp)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            // Only check imports table if no local definition was found
-            if resolved_locations.is_empty() {
-                let imported_locations = self.resolve_imports_from_table(
-                    identifier,
-                    |tree, identifier, contents| {
-                        tree.definition(identifier, contents.as_bytes())
-                            .into_iter()
-                            .filter_map(|loc| {
-                                if let DefinitionLocation::Resolved(location) = loc {
-                                    Some(location)
-                                } else {
-                                    error!("import not resolved after one level of resolution");
+            match definition_location {
+                Some(DefinitionLocation::Resolved(location)) => {
+                    debug!("found local definition for {}", identifier);
+                    Ok(Some(GotoDefinitionResponse::Scalar(location)))
+                }
+                Some(DefinitionLocation::Import(_unresolved_import)) => {
+                    let resolved_import =
+                        self.resolve_import_from_table(identifier, |tree, contents| {
+                            let definition_location =
+                                tree.definition(identifier, contents.as_bytes());
+                            match definition_location {
+                                Some(DefinitionLocation::Resolved(location)) => Some(location),
+                                // if resolved import not found, use _unresolved_import to parse the target document
+                                // however, this shouldn't happen, because we already built the import table when we parsed the source document
+                                Some(DefinitionLocation::Import(_)) | None => {
+                                    error!("import not resolved after lookup in import table");
                                     None
                                 }
-                            })
-                            .collect::<Vec<Location>>()
-                    }
-                );
-                resolved_locations.extend(imported_locations);
-            }
+                            }
+                        });
 
-            if resolved_locations.is_empty() {
-                return Ok(None);
+                    Ok(resolved_import.map(GotoDefinitionResponse::Scalar))
+                }
+                None => Ok(None),
             }
-
-            Ok(Some(GotoDefinitionResponse::Array(resolved_locations)))
         } else {
             Ok(None)
         }
