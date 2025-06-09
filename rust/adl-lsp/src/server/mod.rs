@@ -96,7 +96,7 @@ impl Server {
 
     pub async fn handle_initialize(
         &self,
-        params: InitializeParams,
+        _params: InitializeParams,
     ) -> Result<InitializeResult, ResponseError> {
         let file_operation_filers = vec![FileOperationFilter {
             scheme: Some(String::from("file")),
