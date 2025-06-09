@@ -1,12 +1,18 @@
-use std::collections::HashMap;
 use std::ops::ControlFlow;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockWriteGuard};
+use std::sync::{Arc, Mutex};
 
 use async_lsp::router::Router;
-use async_lsp::{ClientSocket, Error, LanguageClient, ResponseError};
+use async_lsp::{ClientSocket, Error, ResponseError};
 use lsp_types::{
-    DiagnosticOptions, DiagnosticServerCapabilities, DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReportPartialResult, DocumentDiagnosticReportResult, FileOperationFilter, FileOperationPattern, FileOperationPatternKind, FileOperationRegistrationOptions, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location, OneOf, PublishDiagnosticsParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities
+    DiagnosticOptions, DiagnosticServerCapabilities, DidChangeTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReportPartialResult,
+    DocumentDiagnosticReportResult, FileOperationFilter, FileOperationPattern,
+    FileOperationPatternKind, FileOperationRegistrationOptions, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, Location, OneOf, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions,
+    WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
 };
 use tracing::{debug, error};
 
@@ -16,17 +22,11 @@ use crate::parser::hover::Hover as HoverTrait;
 use crate::parser::tree::Tree;
 use crate::parser::{AdlParser, ParsedTree};
 use crate::server::config::ServerConfig;
+use crate::server::state::AdlLanguageServerState;
 
 pub mod config;
 mod modules;
-
-#[derive(Default, Clone)]
-struct AdlLanguageServerState {
-    documents: std::sync::Arc<RwLock<HashMap<Url, String>>>,
-    trees: Arc<RwLock<HashMap<Url, ParsedTree>>>,
-    parser: Arc<Mutex<AdlParser>>,
-    // TODO: store expanded imports for each Url
-}
+mod state;
 
 #[derive(Clone)]
 pub struct Server {
@@ -34,6 +34,7 @@ pub struct Server {
     counter: i32,
     config: ServerConfig,
     state: AdlLanguageServerState,
+    parser: Arc<Mutex<AdlParser>>,
 }
 
 impl From<Server> for Router<Server> {
@@ -48,39 +49,15 @@ impl Server {
             counter: 0,
             client: client.clone(),
             config,
-            state: AdlLanguageServerState::default(),
+            state: AdlLanguageServerState::new(),
+            parser: Arc::new(Mutex::new(AdlParser::new())),
         }
     }
 
-    fn ingest_document(
-        client: &mut ClientSocket,
-        documents: &mut RwLockWriteGuard<HashMap<Url, String>>,
-        trees: &mut RwLockWriteGuard<HashMap<Url, ParsedTree>>,
-        parser: &mut MutexGuard<AdlParser>,
-        uri: &Url,
-        contents: String,
-    ) {
-        debug!("Ingesting document: {uri:?}");
-
-        // TODO: we need to expand all * imports so that GotoDefinition can find them
-
-        // Store document contents
-        documents.insert(uri.clone(), contents.clone());
-
-        // Parse and store AST
-        let tree = parser.parse(uri.clone(), contents);
-
-        if let Some(tree) = tree {
-            let mut d = vec![];
-            d.extend(tree.collect_parse_diagnostics());
-            trees.insert(uri.clone(), tree);
-            // TODO: handle error
-            let _ = client.publish_diagnostics(PublishDiagnosticsParams {
-                uri: uri.clone(),
-                diagnostics: d,
-                version: None,
-            });
-        }
+    fn ingest_document(&mut self, uri: &Url, contents: String) {
+        let mut parser = self.parser.lock().expect("poisoned");
+        self.state
+            .ingest_document(&mut self.client, &mut parser, uri, contents);
     }
 
     pub async fn handle_shutdown(&self) -> Result<(), ResponseError> {
@@ -157,13 +134,8 @@ impl Server {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn resolve_imports<F, T>(
-        client: &mut ClientSocket,
-        trees: &mut RwLockWriteGuard<HashMap<Url, ParsedTree>>,
-        documents: &mut RwLockWriteGuard<HashMap<Url, String>>,
-        parser: &mut MutexGuard<AdlParser>,
-        package_roots: &[PathBuf],
+        &mut self,
         uri: &Url,
         unresolved_imports: Vec<UnresolvedImport>,
         mut process_import: F,
@@ -175,7 +147,7 @@ impl Server {
 
         for unresolved_import in unresolved_imports {
             let possible_import_paths =
-                modules::resolve_import(package_roots, uri, &unresolved_import);
+                modules::resolve_import(&self.config.package_roots, uri, &unresolved_import);
             let parsed_imports: Vec<Option<(Url, String)>> = possible_import_paths
                 .iter()
                 .map(|uri| {
@@ -193,19 +165,13 @@ impl Server {
                 debug!("Resolved import: {resolved_uri:?}");
 
                 // Ingest the document if not already ingested
-                Self::ingest_document(
-                    client,
-                    documents,
-                    trees,
-                    parser,
-                    &resolved_uri,
-                    contents.clone(),
-                );
+                self.ingest_document(&resolved_uri, contents.clone());
 
-                let imported_tree = trees.get(&resolved_uri).unwrap();
-                let imported_results =
-                    process_import(imported_tree, &unresolved_import.identifier, &contents);
-                results.extend(imported_results);
+                if let Some(imported_tree) = self.state.get_document_tree(&resolved_uri) {
+                    let imported_results =
+                        process_import(&imported_tree, &unresolved_import.identifier, &contents);
+                    results.extend(imported_results);
+                }
             }
         }
         results
@@ -218,48 +184,43 @@ impl Server {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let trees = &mut self.state.trees.write().expect("poisoned");
-        let documents = &mut self.state.documents.write().expect("poisoned");
-        let parser = &mut self.state.parser.lock().expect("poisoned");
+        if let Some(tree) = self.state.get_document_tree(&uri) {
+            if let Some(contents) = self.state.get_document_content(&uri) {
+                let contents_bytes = contents.as_bytes();
+                if let Some((identifier, _node)) =
+                    tree.get_user_defined_text(&position, contents_bytes)
+                {
+                    let mut hover_items = tree.hover(identifier, contents_bytes);
 
-        if let Some(tree) = trees.get(&uri) {
-            let contents = documents.get(&uri).unwrap().as_bytes();
-            if let Some((identifier, _node)) = tree.get_user_defined_text(&position, contents) {
-                let mut hover_items = tree.hover(identifier, contents);
+                    debug!("Hovering over: {}", identifier);
+                    debug!("Found hover items: {:?}", hover_items);
 
-                debug!("Hovering over: {}", identifier);
-                debug!("Found hover items: {:?}", hover_items);
+                    // Get definition locations to find imports
+                    let definition_locations = tree.definition(identifier, contents_bytes);
+                    let unresolved_imports: Vec<UnresolvedImport> = definition_locations
+                        .into_iter()
+                        .filter_map(|loc| {
+                            if let DefinitionLocation::Import(imp) = loc {
+                                Some(imp)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
 
-                // Get definition locations to find imports
-                let definition_locations = tree.definition(identifier, contents);
-                let unresolved_imports: Vec<UnresolvedImport> = definition_locations
-                    .into_iter()
-                    .filter_map(|loc| {
-                        if let DefinitionLocation::Import(imp) = loc {
-                            Some(imp)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                    // Handle imports
+                    let imported_hover_items = self.resolve_imports(
+                        &uri,
+                        unresolved_imports,
+                        |tree, identifier, contents| tree.hover(identifier, contents.as_bytes()),
+                    );
+                    hover_items.extend(imported_hover_items);
 
-                // Handle imports
-                let imported_hover_items = Self::resolve_imports(
-                    &mut self.client,
-                    trees,
-                    documents,
-                    parser,
-                    &self.config.package_roots,
-                    &uri,
-                    unresolved_imports,
-                    |tree, identifier, contents| tree.hover(identifier, contents.as_bytes()),
-                );
-                hover_items.extend(imported_hover_items);
-
-                return Ok(Some(Hover {
-                    contents: HoverContents::Array(hover_items),
-                    range: None,
-                }));
+                    return Ok(Some(Hover {
+                        contents: HoverContents::Array(hover_items),
+                        range: None,
+                    }));
+                }
             }
         }
 
@@ -273,20 +234,16 @@ impl Server {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let trees = &mut self.state.trees.write().expect("poisoned");
-        let documents = &mut self.state.documents.write().expect("poisoned");
-        let parser = &mut self.state.parser.lock().expect("poisoned");
-
-        let tree = trees.get(&uri);
+        let tree = self.state.get_document_tree(&uri);
         if tree.is_none() {
             return Ok(None);
         }
         let tree = tree.unwrap();
 
-        if let Some((identifier, node)) = tree.get_user_defined_text(
-            &position,
-            documents.get(&uri).unwrap_or(&"".into()).as_bytes(),
-        ) {
+        let contents = self.state.get_document_content(&uri).unwrap_or_default();
+        let contents_bytes = contents.as_bytes();
+
+        if let Some((identifier, node)) = tree.get_user_defined_text(&position, contents_bytes) {
             let parent = node.parent();
             if parent.is_none() {
                 return Ok(None);
@@ -298,10 +255,7 @@ impl Server {
             }
 
             // Find all definition locations for this identifier in the current file
-            let definition_locations = tree.definition(
-                identifier,
-                documents.get(&uri).unwrap_or(&"".into()).as_bytes(),
-            );
+            let definition_locations = tree.definition(identifier, contents_bytes);
 
             debug!(
                 "found definition locations: {:?}",
@@ -336,15 +290,8 @@ impl Server {
                 .collect();
 
             // Resolve the unresolved imports
-            let imported_locations = Self::resolve_imports(
-                &mut self.client,
-                trees,
-                documents,
-                parser,
-                &self.config.package_roots,
-                &uri,
-                unresolved_imports,
-                |tree, identifier, contents| {
+            let imported_locations =
+                self.resolve_imports(&uri, unresolved_imports, |tree, identifier, contents| {
                     tree.definition(identifier, contents.as_bytes())
                         .into_iter()
                         .filter_map(|loc| {
@@ -356,8 +303,7 @@ impl Server {
                             }
                         })
                         .collect::<Vec<Location>>()
-                },
-            );
+                });
             resolved_locations.extend(imported_locations);
 
             if resolved_locations.is_empty() {
@@ -391,14 +337,7 @@ impl Server {
     ) -> ControlFlow<Result<(), Error>> {
         let uri = params.text_document.uri;
         let contents = params.text_document.text;
-        Self::ingest_document(
-            &mut self.client,
-            &mut self.state.documents.write().expect("poisoned"),
-            &mut self.state.trees.write().expect("poisoned"),
-            &mut self.state.parser.lock().expect("poisoned"),
-            &uri,
-            contents,
-        );
+        self.ingest_document(&uri, contents);
         ControlFlow::Continue(())
     }
 
@@ -408,14 +347,7 @@ impl Server {
     ) -> ControlFlow<Result<(), Error>> {
         let uri = params.text_document.uri;
         let contents = params.content_changes.first().unwrap().text.clone();
-        Self::ingest_document(
-            &mut self.client,
-            &mut self.state.documents.write().expect("poisoned"),
-            &mut self.state.trees.write().expect("poisoned"),
-            &mut self.state.parser.lock().expect("poisoned"),
-            &uri,
-            contents,
-        );
+        self.ingest_document(&uri, contents);
         ControlFlow::Continue(())
     }
 }
