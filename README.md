@@ -13,7 +13,7 @@ efficient parsing. The full grammar is defined in
 [tree-sitter-adl](https://github.com/alexytsu/tree-sitter-adl).
 
 The Rust code in `adl-lsp` borrows code and architecture from
-[coder3101's](https://github.com/coder3101) implementation of a
+[coder3101's](https://github.com/coder3101) implementation of 
 [Protols](https://github.com/coder3101/protols) (a Protobuf Language Server).
 
 ## ✨ Features

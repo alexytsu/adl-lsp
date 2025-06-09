@@ -1,7 +1,8 @@
 # adl-vscode
 
 This provides Language Server Protocol client capabilities integrated with
-[adl-lsp](https://github.com/alexytsu/adl-lsp)
+[adl-lsp](https://github.com/alexytsu/adl-lsp). It is published as a
+[VSCode extension](https://marketplace.visualstudio.com/items?itemName=alexytsu.adl-vscode).
 
 ## Features
 
@@ -10,15 +11,17 @@ This provides Language Server Protocol client capabilities integrated with
 - ✅ Go to definition
 - ✅ Diagnostics
 - ✅ Hover information
-- ✅ Code completion
-- ✅ Formatting
 
 Further planned features
 
+- 🚧 Code completion
+- 🚧 Formatting
 - 🚧 Symbol renaming
 - 🚧 Import management
 - 🚧 Type-checking of interior JSON values
 - 🚧 Plugins for other editors (neovim, helix)
+
+[CHANGELOG](https://marketplace.visualstudio.com/items/alexytsu.adl-vscode/changelog)
 
 ## Requirements
 
@@ -31,7 +34,10 @@ This extension contributes the following settings:
 
 - `adl.lspPath`: If you ran `cargo install adl-lsp` set this to
   "~/.cargo/bin/adl-lsp"
+- `adl.packageRoots`: ADL package locations. An ADL package is the directory
+  that contains top-level ADL modules.
 
-## Known Issues
+## Publishing
 
-## Release Notes
+- Update the [changelog](./CHANGELOG.md) and version number in `package.json`
+- `vsce publish`
