@@ -16,15 +16,15 @@ export async function activate(context: v.ExtensionContext) {
 
   const { dev, prod } = getLspExecutable();
 
-  const serverOptions: ServerOptions = {
-    run: prod,
-    debug: prod,
-  };
-
   // const serverOptions: ServerOptions = {
-  //   run: dev,
-  //   debug: dev,
+  //   run: prod,
+  //   debug: prod,
   // };
+
+  const serverOptions: ServerOptions = {
+    run: dev,
+    debug: dev,
+  };
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "adl" }],
