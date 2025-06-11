@@ -67,6 +67,10 @@ async fn main() {
                 let st = st.clone();
                 async move { st.handle_document_diagnostic_request(params) }
             })
+            .request::<request::DocumentSymbolRequest, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_document_symbol_request(params) }
+            })
             .notification::<notification::DidOpenTextDocument>(|st, params| {
                 st.handle_did_open_text_document(params)
             })

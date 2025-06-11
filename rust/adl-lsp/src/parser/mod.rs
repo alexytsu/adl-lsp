@@ -6,6 +6,7 @@ pub mod definition;
 pub mod diagnostics;
 pub mod hover;
 pub mod references;
+pub mod symbols;
 pub mod tree;
 pub mod ts_lsp_interop;
 

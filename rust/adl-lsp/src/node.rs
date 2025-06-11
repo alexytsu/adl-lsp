@@ -71,6 +71,56 @@ impl NodeKind {
 }
 
 impl NodeKind {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            // Comments and Documentation
+            "comment" => Self::Comment,
+            "docstring" => Self::Docstring,
+
+            // Identifiers and Names
+            "identifier" => Self::Identifier,
+            "scoped_name" => Self::ScopedName,
+            "type_name" => Self::TypeName,
+
+            // Type System
+            "type_parameters" => Self::TypeParameters,
+            "type_arguments" => Self::TypeArguments,
+            "type_expression" => Self::TypeExpression,
+            "primitive_type" => Self::PrimitiveType,
+
+            // Type Definitions
+            "type_definition" => Self::TypeDefinition,
+            "newtype_definition" => Self::NewtypeDefinition,
+            "struct_definition" => Self::StructDefinition,
+            "union_definition" => Self::UnionDefinition,
+            "field" => Self::Field,
+            "field_block" => Self::FieldBlock,
+
+            // Module System
+            "module" => Self::Module,
+            "module_definition" => Self::ModuleDefinition,
+            "module_body" => Self::ModuleBody,
+            "import_declaration" => Self::ImportDeclaration,
+            "import_path" => Self::ImportPath,
+
+            // Annotations
+            "annotation" => Self::Annotation,
+            "annotations" => Self::Annotations,
+            "annotation_declaration" => Self::AnnotationDeclaration,
+
+            // JSON
+            "json_value" => Self::JsonValue,
+            "json_number" => Self::JsonNumber,
+            "json_string" => Self::JsonString,
+            "json_array" => Self::JsonArray,
+            "json_object" => Self::JsonObject,
+            "json_object_pair" => Self::JsonObjectPair,
+
+            // Default to Error for unknown kinds
+            _ => Self::Error,
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         match self {
             // Comments and Documentation

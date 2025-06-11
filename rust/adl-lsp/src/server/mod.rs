@@ -7,13 +7,14 @@ use async_lsp::{ClientSocket, Error, ResponseError};
 use lsp_types::{
     DiagnosticOptions, DiagnosticServerCapabilities, DidChangeTextDocumentParams,
     DidOpenTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReportPartialResult,
-    DocumentDiagnosticReportResult, FileOperationFilter, FileOperationPattern,
-    FileOperationPatternKind, FileOperationRegistrationOptions, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, OneOf, ReferenceParams, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions,
-    WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
+    DocumentDiagnosticReportResult, DocumentSymbolParams, DocumentSymbolResponse,
+    FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
+    FileOperationRegistrationOptions, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    Location, OneOf, ReferenceParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
+    WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
+    WorkspaceServerCapabilities,
 };
 use tracing::{debug, error};
 
@@ -21,6 +22,7 @@ use crate::node::NodeKind;
 use crate::parser::definition::{Definition, DefinitionLocation};
 use crate::parser::hover::Hover as HoverTrait;
 use crate::parser::references::References;
+use crate::parser::symbols::DocumentSymbols;
 use crate::parser::{AdlParser, ParsedTree};
 use crate::server::config::ServerConfig;
 use crate::server::state::AdlLanguageServerState;
@@ -194,6 +196,7 @@ impl Server {
                         },
                     },
                 )),
+                document_symbol_provider: Some(OneOf::Left(true)),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: None,
                     file_operations: Some(WorkspaceFileOperationsServerCapabilities {
@@ -475,6 +478,35 @@ impl Server {
                 related_documents: None,
             },
         ))
+    }
+
+    pub fn handle_document_symbol_request(
+        &mut self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>, ResponseError> {
+        let uri = params.text_document.uri;
+
+        // First try to get cached symbols
+        if let Some(cached_symbols) = self.state.get_cached_document_symbols(&uri) {
+            if cached_symbols.is_empty() {
+                return Ok(None);
+            } else {
+                return Ok(Some(DocumentSymbolResponse::Nested(cached_symbols)));
+            }
+        }
+
+        // If not cached, parse and compute symbols
+        let Some((tree, content)) = self.get_or_parse_document_with_content(&uri) else {
+            return Ok(None);
+        };
+
+        let symbols = tree.collect_document_symbols(content.as_bytes());
+
+        if symbols.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+        }
     }
 }
 

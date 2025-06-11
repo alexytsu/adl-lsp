@@ -44,9 +44,7 @@ impl ParsedTree {
                 // Include all usages except definitions and imports
                 let is_from_definition = Self::is_from_definition(n);
                 let is_from_import = Self::is_from_import_declaration(n).0;
-                let should_include = !is_from_definition && !is_from_import;
-
-                should_include
+                !is_from_definition && !is_from_import
             })
             .collect();
 

@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_lsp::{ClientSocket, LanguageClient};
-use lsp_types::{PublishDiagnosticsParams, Url};
+use lsp_types::{DocumentSymbol, PublishDiagnosticsParams, Url};
 use tracing::debug;
 
+use crate::parser::symbols::DocumentSymbols;
 use crate::parser::{AdlParser, ParsedTree};
 use crate::server::imports::{ImportManager, ImportsCache};
 
@@ -14,6 +15,7 @@ use crate::server::imports::{ImportManager, ImportsCache};
 pub struct AdlLanguageServerState {
     documents: Arc<RwLock<HashMap<Url, String>>>,
     trees: Arc<RwLock<HashMap<Url, ParsedTree>>>,
+    symbols: Arc<RwLock<HashMap<Url, Vec<DocumentSymbol>>>>,
     import_manager: ImportsCache,
 }
 
@@ -56,14 +58,17 @@ impl AdlLanguageServerState {
         // Store document contents
         documents.insert(uri.clone(), contents.clone());
 
-        // Store parsed tree and publish diagnostics
         if let Some(tree) = parsed_tree {
+            // Collect diagnostics from the tree
             let mut diagnostics = vec![];
             diagnostics.extend(tree.collect_parse_diagnostics());
             trees.insert(uri.clone(), tree.clone());
 
-            // Resolve all imports into the imports table
-            // This closure can parse documents that aren't already ingested
+            // Cache document symbols
+            let symbols = tree.collect_document_symbols(contents.as_bytes());
+            let mut symbols_cache = self.symbols.write().expect("poisoned");
+            symbols_cache.insert(uri.clone(), symbols);
+
             let mut get_or_parse_document_tree = |target_uri: &Url| -> Option<ParsedTree> {
                 // First try to get from already parsed trees
                 if let Some(existing_tree) = trees.get(target_uri) {
@@ -124,5 +129,10 @@ impl AdlLanguageServerState {
             (Some(tree), Some(content)) => Some((tree.clone(), content.clone())),
             _ => None,
         }
+    }
+
+    /// Get cached document symbols if available
+    pub fn get_cached_document_symbols(&self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
+        self.symbols.read().expect("poisoned").get(uri).cloned()
     }
 }
