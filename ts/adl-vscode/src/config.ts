@@ -70,7 +70,7 @@ export function getLspExecutable(): {
       command: "cargo",
       args: ["run", "--bin", "adl-lsp", "--", ...adlLspArgs],
       options: {
-        cwd: "/Users/alexytsu/Develop/Repositories/adl-lang/adl-lsp/rust/adl-lsp",
+        cwd: "/Users/alexytsu/Develop/Repositories/alexytsu/adl-lsp/rust/adl-lsp",
       },
     },
     prod: {
