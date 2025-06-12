@@ -17,7 +17,7 @@ use lsp_types::{
     WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
     WorkspaceServerCapabilities,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 
 use crate::node::NodeKind;
 use crate::parser::definition::{Definition, DefinitionLocation};
@@ -180,7 +180,7 @@ impl Server {
             file_operation_filers.push(FileOperationFilter {
                 scheme: Some(String::from("file")),
                 pattern: FileOperationPattern {
-                    glob: format!("**/*.adl-{}", suffix),
+                    glob: String::from(format!("**/*.adl-{}", suffix)),
                     matches: Some(FileOperationPatternKind::File),
                     ..Default::default()
                 },
@@ -547,8 +547,6 @@ impl Server {
         params: DidChangeTextDocumentParams,
     ) -> ControlFlow<Result<(), Error>> {
         let uri = params.text_document.uri;
-
-        trace!("did change text document: {:?}", params.content_changes);
         let contents = params.content_changes.first().unwrap().text.clone();
         self.ingest_document(&uri, contents);
         ControlFlow::Continue(())
@@ -559,7 +557,6 @@ impl Server {
         params: DidSaveTextDocumentParams,
     ) -> ControlFlow<Result<(), Error>> {
         let uri = params.text_document.uri;
-        trace!("did save text document: {:?}", params.text);
         if let Some(contents) = params.text {
             self.ingest_document(&uri, contents);
         }
@@ -568,10 +565,8 @@ impl Server {
 
     pub fn handle_did_close_text_document(
         &mut self,
-        params: DidCloseTextDocumentParams,
+        _params: DidCloseTextDocumentParams,
     ) -> ControlFlow<Result<(), Error>> {
-        let uri = params.text_document.uri;
-        trace!("did close text document: {:?}", uri);
         ControlFlow::Continue(())
     }
 }

@@ -10,7 +10,7 @@ use async_lsp::tracing::TracingLayer;
 use clap::Parser;
 use lsp_types::{notification, request};
 use tower::ServiceBuilder;
-use tracing::{Level, debug};
+use tracing::{Level, debug, trace};
 
 use crate::cli::Cli;
 use crate::server::Server;
@@ -72,19 +72,19 @@ async fn main() {
                 async move { st.handle_document_symbol_request(params) }
             })
             .notification::<notification::DidOpenTextDocument>(|st, params| {
-                debug!("did open text document: {:?}", params);
+                trace!("did open text document: {:?}", params);
                 st.handle_did_open_text_document(params)
             })
             .notification::<notification::DidChangeTextDocument>(|st, params| {
-                debug!("did change text document: {:?}", params);
+                trace!("did change text document: {:?}", params);
                 st.handle_did_change_text_document(params)
             })
             .notification::<notification::DidSaveTextDocument>(|st, params| {
-                debug!("did save text document: {:?}", params);
+                trace!("did save text document: {:?}", params);
                 st.handle_did_save_text_document(params)
             })
             .notification::<notification::DidCloseTextDocument>(|st, params| {
-                debug!("did close text document: {:?}", params);
+                trace!("did close text document: {:?}", params);
                 st.handle_did_close_text_document(params)
             })
             .notification::<notification::Exit>(|st, _| st.handle_exit())
