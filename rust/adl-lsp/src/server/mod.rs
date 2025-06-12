@@ -315,12 +315,6 @@ impl Server {
 
         let mut hover_items = tree.hover(identifier, contents_bytes);
 
-        debug!(
-            "{} has {} hover items locally",
-            identifier,
-            hover_items.len()
-        );
-
         // check imports if no local definition was found
         if hover_items.is_empty() {
             let imported_hover_items = self
