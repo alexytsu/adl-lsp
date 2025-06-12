@@ -180,7 +180,7 @@ impl Server {
             file_operation_filers.push(FileOperationFilter {
                 scheme: Some(String::from("file")),
                 pattern: FileOperationPattern {
-                    glob: String::from(format!("**/*.adl-{}", suffix)),
+                    glob: format!("**/*.adl-{}", suffix),
                     matches: Some(FileOperationPatternKind::File),
                     ..Default::default()
                 },

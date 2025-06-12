@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use async_lsp::lsp_types::Url;
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 use crate::node::NodeKind;
 use crate::parser::ParsedTree;
