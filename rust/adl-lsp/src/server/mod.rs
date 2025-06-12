@@ -360,6 +360,12 @@ impl Server {
                 Ok(Some(GotoDefinitionResponse::Scalar(location)))
             }
             Some(DefinitionLocation::Import(_unresolved_import)) => {
+                // TODO: _unresolved import doesn't really need any information on it, since using the import table allows us to resolve via the identifier name
+                debug!(
+                    "declaration for {} was imported from {}",
+                    identifier,
+                    _unresolved_import.target_module_path.join(".")
+                );
                 let resolved_import =
                     self.resolve_import_from_table(identifier, |tree, contents| {
                         let definition_location = tree.definition(identifier, contents.as_bytes());
