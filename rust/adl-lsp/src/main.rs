@@ -72,17 +72,25 @@ async fn main() {
                 async move { st.handle_document_symbol_request(params) }
             })
             .notification::<notification::DidOpenTextDocument>(|st, params| {
+                debug!("did open text document: {:?}", params);
                 st.handle_did_open_text_document(params)
             })
             .notification::<notification::DidChangeTextDocument>(|st, params| {
+                debug!("did change text document: {:?}", params);
                 st.handle_did_change_text_document(params)
+            })
+            .notification::<notification::DidSaveTextDocument>(|st, params| {
+                debug!("did save text document: {:?}", params);
+                st.handle_did_save_text_document(params)
+            })
+            .notification::<notification::DidCloseTextDocument>(|st, params| {
+                debug!("did close text document: {:?}", params);
+                st.handle_did_close_text_document(params)
             })
             .notification::<notification::Exit>(|st, _| st.handle_exit())
             // TODO: handle these notifications
             .notification::<notification::Initialized>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::DidChangeConfiguration>(|_, _| ControlFlow::Continue(()))
-            .notification::<notification::DidSaveTextDocument>(|_, _| ControlFlow::Continue(()))
-            .notification::<notification::DidCloseTextDocument>(|_, _| ControlFlow::Continue(()))
             .event::<TickEvent>(|st, _| st.handle_tick_event());
 
         ServiceBuilder::new()

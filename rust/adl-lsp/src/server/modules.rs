@@ -1,6 +1,6 @@
 use async_lsp::lsp_types::Url;
 use std::path::{Path, PathBuf};
-use tracing::debug;
+use tracing::trace;
 
 use crate::parser::definition::UnresolvedImport;
 
@@ -11,8 +11,8 @@ pub fn resolve_import(
 ) -> Vec<Url> {
     // the source package might not be specified in the roots, we can be lenient of that
     let mut potential_urls = Vec::with_capacity(package_roots.len() + 1);
-    debug!(
-        "Resolving import: source={:?}, target_path={:?}, identifier={}",
+    trace!(
+        "resolving import: source={:?}, target_path={:?}, identifier={}",
         source_uri.path(),
         unresolved_import.target_module_path,
         unresolved_import.identifier
@@ -23,7 +23,6 @@ pub fn resolve_import(
     let source_module_path: Vec<&str> = unresolved_import.source_module.split(".").collect();
     let source_module_depth = source_module_path.len();
     let adl_root = source_path.ancestors().nth(source_module_depth).unwrap();
-    debug!("source module ADL-package root: {:?}", adl_root);
 
     // NOTE: could send a notification for diagnostics to report if the source module *isn't in the specified workspace roots
 
@@ -32,11 +31,9 @@ pub fn resolve_import(
         "{}.adl",
         unresolved_import.target_module_path.join("/")
     ));
-    debug!("resolved path: {:?}", source_package_target_path);
 
     potential_urls.push(Url::from_file_path(&source_package_target_path).unwrap());
 
-    debug!("package_roots: {:?}", package_roots);
     potential_urls.extend(package_roots.iter().filter_map(|root| {
         let target_path = root.join(format!(
             "{}.adl",

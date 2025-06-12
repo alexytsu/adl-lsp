@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use async_lsp::lsp_types::Url;
-use tracing::debug;
+use tracing::{debug, trace, warn};
 
 use crate::node::NodeKind;
 use crate::parser::ParsedTree;
@@ -94,8 +94,8 @@ impl ImportsCache {
 
     /// Clear all imports and definitions for a given source URI that has been updated
     fn clear_source_caches(&self, source_uri: &Url) {
-        debug!(
-            "Clearing imports and definitions for source file: {}",
+        trace!(
+            "clearing imports and definitions for source file: {}",
             source_uri.path()
         );
 
@@ -152,7 +152,7 @@ impl ImportManager for ImportsCache {
         content: &[u8],
         get_or_parse_document_tree: &mut impl FnMut(&Url) -> Option<ParsedTree>,
     ) {
-        debug!("Resolving imports for document: {}", source_uri);
+        trace!("resolving imports for document: {}", source_uri);
 
         // Clear existing imports for this source
         self.clear_source_caches(source_uri);
@@ -178,7 +178,7 @@ impl ImportManager for ImportsCache {
 impl ImportsCache {
     /// Register all type definitions in a document
     fn register_document_definitions(&self, source_uri: &Url, tree: &ParsedTree, content: &[u8]) {
-        debug!("Registering definitions for document: {}", source_uri);
+        debug!("registering definitions for document: {}", source_uri);
 
         // Find all type definitions in this document
         let type_definitions = self.find_type_definitions(tree, content);
@@ -201,7 +201,6 @@ impl ImportsCache {
         // Extract import path from the import declaration
         if let Some(import_path_node) = import_node.child(1) {
             let import_path_text = import_path_node.utf8_text(content).unwrap_or("");
-            debug!("Processing import: {}", import_path_text);
 
             // Parse the import path
             let parts: Vec<&str> = import_path_text.split('.').collect();
@@ -255,7 +254,7 @@ impl ImportsCache {
         target_module_path: &Vec<String>,
         get_or_parse_document_tree: &mut impl FnMut(&Url) -> Option<ParsedTree>,
     ) {
-        debug!("Expanding star import from {:?}", target_module_path);
+        debug!("expanding star import from {:?}", target_module_path);
 
         // Create an unresolved import to find the target module
         let unresolved = UnresolvedImport {
@@ -309,7 +308,7 @@ impl ImportsCache {
             }
         }
 
-        debug!("Found type definitions: {:?}", type_names);
+        debug!("found type definitions: {:?}", type_names);
         type_names
     }
 
@@ -323,7 +322,7 @@ impl ImportsCache {
         identifier: &String,
     ) {
         debug!(
-            "Resolving regular import: {} from {:?}",
+            "resolving regular import: {} from {:?}",
             identifier, target_module_path
         );
 
@@ -338,18 +337,17 @@ impl ImportsCache {
         let possible_paths = modules::resolve_import(package_roots, source_uri, &unresolved);
 
         for ref target_uri in possible_paths {
-            debug!("Checking target path: {}", target_uri.path());
             // Only add the symbol if the target file actually exists
             if std::fs::metadata(target_uri.path()).is_ok() {
-                debug!(
-                    "Target file exists, adding to imports table: {}",
+                trace!(
+                    "target file exists, adding to imports table: {}",
                     target_uri.path()
                 );
                 // TODO: check if the target file actually contains the definition
                 self.add_import(source_uri, identifier, target_uri);
             } else {
-                debug!(
-                    "Target file does not exist, skipping: {}",
+                trace!(
+                    "target file does not exist, skipping: {}",
                     target_uri.path()
                 );
             }
