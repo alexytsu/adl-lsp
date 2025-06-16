@@ -1,0 +1,15 @@
+---
+source: src/parser/diagnostics.rs
+assertion_line: 48
+expression: parsed.unwrap().collect_parse_diagnostics()
+---
+- range:
+    start:
+      line: 0
+      character: 0
+    end:
+      line: 15
+      character: 2
+  severity: 1
+  source: adl-vscode
+  message: Syntax error
