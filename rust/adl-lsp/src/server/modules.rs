@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_rooted_deep_in_workspace() {
-        let package_roots = vec![PathBuf::from("/project")];
+        let package_roots = vec![PathBuf::from("/project/a/b/c/d/e/f/g/adl")];
         let source_uri =
             Url::parse("file:///project/a/b/c/d/e/f/g/adl/a/b/c/d/e/f/g/module.adl").unwrap();
         let unresolved = UnresolvedImport {
