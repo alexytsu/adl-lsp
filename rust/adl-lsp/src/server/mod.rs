@@ -3,19 +3,19 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_lsp::router::Router;
-use async_lsp::{ClientSocket, Error, ResponseError};
+use async_lsp::{ClientSocket, Error, ErrorCode, ResponseError};
 use lsp_types::{
     DiagnosticOptions, DiagnosticServerCapabilities, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentDiagnosticParams, DocumentDiagnosticReportPartialResult,
-    DocumentDiagnosticReportResult, DocumentSymbolParams, DocumentSymbolResponse,
-    FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
-    FileOperationRegistrationOptions, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    Location, OneOf, ReferenceParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
-    WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
-    WorkspaceServerCapabilities,
+    DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
+    DocumentSymbolParams, DocumentSymbolResponse, FileOperationFilter, FileOperationPattern,
+    FileOperationPatternKind, FileOperationRegistrationOptions, FullDocumentDiagnosticReport,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, Location, OneOf, ReferenceParams,
+    RelatedFullDocumentDiagnosticReport, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions,
+    WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
 };
 use tracing::{debug, error};
 
@@ -489,14 +489,27 @@ impl Server {
     }
 
     pub fn handle_document_diagnostic_request(
-        &self,
-        _params: DocumentDiagnosticParams,
+        &mut self,
+        params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult, ResponseError> {
-        // TODO: implement this. currently we publish diagnostics on every change, so this is not needed
-        Ok(DocumentDiagnosticReportResult::Partial(
-            DocumentDiagnosticReportPartialResult {
+        let uri = params.text_document.uri;
+        let Some(tree) = self.get_or_parse_document(&uri) else {
+            return Err(ResponseError::new(
+                ErrorCode::INVALID_REQUEST,
+                "document not found",
+            ));
+        };
+
+        let diagnostics = tree.collect_diagnostics();
+
+        Ok(DocumentDiagnosticReportResult::Report(
+            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
                 related_documents: None,
-            },
+                full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                    items: diagnostics,
+                    result_id: None,
+                },
+            }),
         ))
     }
 

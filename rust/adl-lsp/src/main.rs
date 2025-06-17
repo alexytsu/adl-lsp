@@ -64,7 +64,7 @@ async fn main() {
                 async move { st.handle_find_references(params) }
             })
             .request::<request::DocumentDiagnosticRequest, _>(|st, params| {
-                let st = st.clone();
+                let mut st = st.clone();
                 async move { st.handle_document_diagnostic_request(params) }
             })
             .request::<request::DocumentSymbolRequest, _>(|st, params| {
