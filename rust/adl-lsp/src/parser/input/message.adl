@@ -12,5 +12,6 @@ module input.message {
         Name author;
         Content content;
         User user;
+        common.string.StringNE string_not_empty;
     };
 };

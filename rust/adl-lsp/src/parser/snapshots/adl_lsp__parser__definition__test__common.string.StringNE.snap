@@ -1,0 +1,10 @@
+---
+source: src/parser/definition.rs
+expression: string_not_empty
+---
+Import:
+  source_module: input.message
+  target_module_path:
+    - common
+    - string
+  identifier: StringNE
