@@ -3,6 +3,17 @@
 All notable changes to the "alexytsu.adl-vscode" extension will be documented in
 this file.
 
+## [0.2.0] - 2025-06-17
+
+Features:
+- Basic diagnostic errors for invalid imports: https://github.com/alexytsu/adl-lsp/issues/18
+- Document outline and symbol support
+
+Bugfixes:
+- Fix parsing error for doccomments mixed with annotations
+- Fix parsing error for remotely defined annotations on struct fields: https://github.com/alexytsu/adl-lsp/issues/15
+- Fix goto definition for fully-qualified types: https://github.com/alexytsu/adl-lsp/issues/17
+
 ## [0.1.0] - 2025-06-11
 
 - Implement goto references via `adl-lsp@0.5.0`
