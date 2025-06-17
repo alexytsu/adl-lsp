@@ -3,6 +3,10 @@
 All notable changes to the "alexytsu.adl-vscode" extension will be documented in
 this file.
 
+## [0.2.2] - 2025-06-17
+
+Logos for ADL files
+
 ## [0.2.1] - 2025-06-17
 
 Link to correct `adl-lsp` binary
