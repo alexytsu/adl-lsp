@@ -3,6 +3,7 @@
   "displayName": "ADL",
   "description": "LSP support for Algebraic Data Language",
   "repository": "https://github.com/alexytsu/adl-lsp",
+  "icon": "assets/adl-icon.png",
   "publisher": "alexytsu",
   "version": "0.2.1",
   "engines": {
@@ -49,7 +50,11 @@
           "ADL",
           "adl"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "assets/adl-file-light.png",
+          "dark": "assets/adl-file-dark.png"
+        }
       }
     ],
     "grammars": [
