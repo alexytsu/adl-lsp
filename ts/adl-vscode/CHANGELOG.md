@@ -3,7 +3,13 @@
 All notable changes to the "alexytsu.adl-vscode" extension will be documented in
 this file.
 
+## [0.2.1] - 2025-06-17
+
+Link to correct `adl-lsp` binary
+
 ## [0.2.0] - 2025-06-17
+
+DO NOT INSTALL: this was mistakenly published with local development settings enabled
 
 Features:
 - Basic diagnostic errors for invalid imports: https://github.com/alexytsu/adl-lsp/issues/18
