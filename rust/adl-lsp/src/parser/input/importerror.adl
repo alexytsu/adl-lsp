@@ -1,0 +1,8 @@
+module input.message {
+    // this is a valid import
+    import common.db.User;
+
+    type Name = String;
+
+    import common.db.Hello;
+};

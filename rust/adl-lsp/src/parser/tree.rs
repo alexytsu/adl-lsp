@@ -14,9 +14,8 @@ pub trait Tree {
         early: bool,
     ) -> Vec<Node<'a>>;
     fn get_node_at_position<'a>(&'a self, pos: &Position) -> Option<Node<'a>>;
-    #[allow(dead_code)]
     fn find_all_nodes(&self, f: fn(&Node) -> bool) -> Vec<Node>;
-    fn find_first_node(&self, f: fn(&Node) -> bool) -> Vec<Node>;
+    fn find_first_node<'a>(&'a self, f: fn(&Node) -> bool) -> Option<Node<'a>>;
     fn find_node_from<'a>(&self, n: Node<'a>, f: fn(&Node) -> bool) -> Vec<Node<'a>>;
 }
 
@@ -83,8 +82,8 @@ impl Tree for ParsedTree {
         Self::walk_and_filter(&mut cursor, f, false)
     }
 
-    fn find_first_node(&self, f: fn(&Node) -> bool) -> Vec<Node> {
-        self.find_node_from(self.tree.root_node(), f)
+    fn find_first_node<'a>(&'a self, f: fn(&Node) -> bool) -> Option<Node<'a>> {
+        self.find_node_from(self.tree.root_node(), f).first().copied()
     }
 
     fn find_node_from<'a>(&self, n: Node<'a>, f: fn(&Node) -> bool) -> Vec<Node<'a>> {
