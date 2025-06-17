@@ -26,7 +26,6 @@ pub enum NodeKind {
     FieldBlock,
 
     // Module System
-    Module,
     ModuleDefinition,
     ModuleBody,
     ImportDeclaration,
@@ -36,6 +35,7 @@ pub enum NodeKind {
     Annotation,
     Annotations,
     AnnotationDeclaration,
+    FieldReference,
 
     // JSON
     JsonValue,
@@ -97,7 +97,6 @@ impl NodeKind {
             "field_block" => Self::FieldBlock,
 
             // Module System
-            "module" => Self::Module,
             "module_definition" => Self::ModuleDefinition,
             "module_body" => Self::ModuleBody,
             "import_declaration" => Self::ImportDeclaration,
@@ -107,6 +106,7 @@ impl NodeKind {
             "annotation" => Self::Annotation,
             "annotations" => Self::Annotations,
             "annotation_declaration" => Self::AnnotationDeclaration,
+            "field_reference" => Self::FieldReference,
 
             // JSON
             "json_value" => Self::JsonValue,
@@ -130,28 +130,23 @@ impl NodeKind {
             // Identifiers and Names
             Self::Identifier => "identifier",
             Self::ScopedName => "scoped_name",
+            Self::TypeName => "type_name",
 
             // Type System
-            Self::TypeName => "type_name",
             Self::TypeParameters => "type_parameters",
-            Self::TypeExpression => "type_expression",
             Self::TypeArguments => "type_arguments",
+            Self::TypeExpression => "type_expression",
             Self::PrimitiveType => "primitive_type",
-
-            // Structs
-            Self::StructDefinition => "struct_definition",
-            Self::Field => "field",
-            Self::FieldBlock => "field_block",
-
-            // Unions
-            Self::UnionDefinition => "union_definition",
 
             // Type Definitions
             Self::TypeDefinition => "type_definition",
             Self::NewtypeDefinition => "newtype_definition",
+            Self::StructDefinition => "struct_definition",
+            Self::UnionDefinition => "union_definition",
+            Self::Field => "field",
+            Self::FieldBlock => "field_block",
 
             // Module System
-            Self::Module => "module",
             Self::ModuleDefinition => "module_definition",
             Self::ModuleBody => "module_body",
             Self::ImportDeclaration => "import_declaration",
@@ -161,6 +156,7 @@ impl NodeKind {
             Self::Annotation => "annotation",
             Self::Annotations => "annotations",
             Self::AnnotationDeclaration => "annotation_declaration",
+            Self::FieldReference => "field_reference",
 
             // JSON
             Self::JsonValue => "json_value",
@@ -189,19 +185,15 @@ impl NodeKind {
         n.kind() == Self::Identifier.as_str()
     }
 
-    pub fn is_module_definition(n: &Node) -> bool {
-        n.kind() == Self::ModuleDefinition.as_str()
-    }
-
     pub fn is_scoped_name(n: &Node) -> bool {
         n.kind() == Self::ScopedName.as_str()
     }
 
-    // Type System
     pub fn is_type_name(n: &Node) -> bool {
         n.kind() == Self::TypeName.as_str()
     }
 
+    // Type System
     pub fn is_type_parameters(n: &Node) -> bool {
         n.kind() == Self::TypeParameters.as_str()
     }
@@ -218,24 +210,6 @@ impl NodeKind {
         n.kind() == Self::PrimitiveType.as_str()
     }
 
-    // Structs
-    pub fn is_struct_definition(n: &Node) -> bool {
-        n.kind() == Self::StructDefinition.as_str()
-    }
-
-    pub fn is_field_block(n: &Node) -> bool {
-        n.kind() == Self::FieldBlock.as_str()
-    }
-
-    pub fn is_field(n: &Node) -> bool {
-        n.kind() == Self::Field.as_str()
-    }
-
-    // Unions
-    pub fn is_union_definition(n: &Node) -> bool {
-        n.kind() == Self::UnionDefinition.as_str()
-    }
-
     // Type Definitions
     pub fn is_type_definition(n: &Node) -> bool {
         n.kind() == Self::TypeDefinition.as_str()
@@ -245,9 +219,25 @@ impl NodeKind {
         n.kind() == Self::NewtypeDefinition.as_str()
     }
 
+    pub fn is_struct_definition(n: &Node) -> bool {
+        n.kind() == Self::StructDefinition.as_str()
+    }
+
+    pub fn is_union_definition(n: &Node) -> bool {
+        n.kind() == Self::UnionDefinition.as_str()
+    }
+
+    pub fn is_field(n: &Node) -> bool {
+        n.kind() == Self::Field.as_str()
+    }
+
+    pub fn is_field_block(n: &Node) -> bool {
+        n.kind() == Self::FieldBlock.as_str()
+    }
+
     // Module System
-    pub fn is_module(n: &Node) -> bool {
-        n.kind() == Self::Module.as_str()
+    pub fn is_module_definition(n: &Node) -> bool {
+        n.kind() == Self::ModuleDefinition.as_str()
     }
 
     pub fn is_module_body(n: &Node) -> bool {
@@ -273,6 +263,10 @@ impl NodeKind {
 
     pub fn is_annotation_declaration(n: &Node) -> bool {
         n.kind() == Self::AnnotationDeclaration.as_str()
+    }
+
+    pub fn is_field_reference(n: &Node) -> bool {
+        n.kind() == Self::FieldReference.as_str()
     }
 
     // JSON
