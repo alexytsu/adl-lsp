@@ -16,10 +16,10 @@ tower = "0.5.2"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 tree-sitter = "0.25.6"
-tree-sitter-adl = { version = "0.4.1" }
+tree-sitter-adl = { version = "0.5.0" }
 
 # useful for local development
-# tree-sitter-adl = { version = "0.4.1", path = "../../../tree-sitter-adl" }
+# tree-sitter-adl = { version = "0.5.0", path = "../../../tree-sitter-adl" }
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["yaml"] }
