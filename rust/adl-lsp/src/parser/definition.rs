@@ -42,6 +42,7 @@ impl Definition for ParsedTree {
     }
 }
 
+// TODO: handle goto field for annotations
 impl ParsedTree {
     pub fn is_from_definition(node: &Node<'_>) -> bool {
         NodeKind::is_definition(node) || node.parent().is_some_and(|p| Self::is_from_definition(&p))
