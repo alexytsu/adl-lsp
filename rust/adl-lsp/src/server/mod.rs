@@ -5,13 +5,14 @@ use std::sync::{Arc, Mutex};
 use async_lsp::router::Router;
 use async_lsp::{ClientSocket, Error, ErrorCode, ResponseError};
 use lsp_types::{
-    DiagnosticOptions, DiagnosticServerCapabilities, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
-    DocumentSymbolParams, DocumentSymbolResponse, FileOperationFilter, FileOperationPattern,
-    FileOperationPatternKind, FileOperationRegistrationOptions, FullDocumentDiagnosticReport,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, Location, OneOf, ReferenceParams,
+    DiagnosticOptions, DiagnosticServerCapabilities, DidChangeConfigurationParams,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReport,
+    DocumentDiagnosticReportResult, DocumentSymbolParams, DocumentSymbolResponse,
+    FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
+    FileOperationRegistrationOptions, FullDocumentDiagnosticReport, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, Location, OneOf, ReferenceParams,
     RelatedFullDocumentDiagnosticReport, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions,
@@ -609,6 +610,29 @@ impl Server {
         &mut self,
         _params: DidCloseTextDocumentParams,
     ) -> ControlFlow<Result<(), Error>> {
+        ControlFlow::Continue(())
+    }
+
+    pub fn handle_did_change_configuration(
+        &mut self,
+        params: DidChangeConfigurationParams,
+    ) -> ControlFlow<Result<(), Error>> {
+        let package_roots: Result<Vec<PathBuf>, ResponseError> = params
+            .settings
+            .get("packageRoots")
+            .ok_or_else(|| ResponseError::new(ErrorCode::INTERNAL_ERROR, "packageRoots not found"))
+            .map(|v| {
+                v.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| PathBuf::from(v.as_str().unwrap()))
+                    .collect()
+            });
+        if let Ok(package_roots) = package_roots {
+            self.config.package_roots = package_roots;
+            self.state.clear_cache();
+            self.initialize_workspace();
+        }
         ControlFlow::Continue(())
     }
 }

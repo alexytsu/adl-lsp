@@ -90,7 +90,10 @@ async fn main() {
             .notification::<notification::Exit>(|st, _| st.handle_exit())
             // TODO: handle these notifications
             .notification::<notification::Initialized>(|_, _| ControlFlow::Continue(()))
-            .notification::<notification::DidChangeConfiguration>(|_, _| ControlFlow::Continue(()))
+            .notification::<notification::DidChangeConfiguration>(|st, params| {
+                trace!("did change configuration: {:?}", params);
+                st.handle_did_change_configuration(params)
+            })
             .event::<TickEvent>(|st, _| st.handle_tick_event());
 
         ServiceBuilder::new()

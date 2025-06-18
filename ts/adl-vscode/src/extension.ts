@@ -1,12 +1,13 @@
 import * as v from "vscode";
 import {
+  DidChangeConfigurationNotification,
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
 } from "vscode-languageclient/node";
 import { checkVersionAndNotify } from "./check-version";
 import { registerCommands } from "./commands";
-import { getLspExecutable } from "./config";
+import { getLspExecutable, getPackageRoots } from "./config";
 
 let client: LanguageClient;
 
@@ -35,6 +36,17 @@ export async function activate(context: v.ExtensionContext) {
     serverOptions,
     clientOptions
   );
+
+  v.workspace.onDidChangeConfiguration(async (e) => {
+    console.log("Configuration changed: ", e);
+    if (e.affectsConfiguration("adl.packageRoots")) {
+      client.sendNotification(DidChangeConfigurationNotification.type, {
+        settings: {
+          packageRoots: getPackageRoots(),
+        },
+      });
+    }
+  });
 
   await client.start();
 

@@ -31,6 +31,12 @@ pub struct ImportsCache {
 }
 
 impl ImportsCache {
+    pub fn clear(&mut self) {
+        self.definition_locations.write().expect("poisoned").clear();
+        self.imported_symbols.write().expect("poisoned").clear();
+        self.defined_symbols.write().expect("poisoned").clear();
+    }
+
     /// Attempt to lookup the uri where an identifier is defined
     pub fn lookup_fqn(&self, fqn: &Fqn) -> Option<Url> {
         self.definition_locations
@@ -113,6 +119,9 @@ pub trait ImportManager {
     /// Get the imports cache
     fn cache(&self) -> &ImportsCache;
 
+    /// Clear the imports cache
+    fn clear_cache(&mut self);
+
     /// Resolve imports from a document and populate the imports table
     fn resolve_document_imports(
         &self,
@@ -128,6 +137,11 @@ impl ImportManager for ImportsCache {
     /// Get the imports cache
     fn cache(&self) -> &ImportsCache {
         self
+    }
+
+    /// Clear the imports cache
+    fn clear_cache(&mut self) {
+        self.clear();
     }
 
     /// Resolve imports from a document and populate the imports table

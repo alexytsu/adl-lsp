@@ -24,6 +24,13 @@ impl AdlLanguageServerState {
         Self::default()
     }
 
+    pub fn clear_cache(&mut self) {
+        self.documents.write().expect("poisoned").clear();
+        self.trees.write().expect("poisoned").clear();
+        self.symbols.write().expect("poisoned").clear();
+        self.import_manager.clear_cache();
+    }
+
     /// Get the target URI for an identifier from the imports table
     pub fn get_import_target(&self, fqn: &Fqn) -> Option<Url> {
         self.import_manager.cache().lookup_fqn(fqn)
@@ -31,9 +38,7 @@ impl AdlLanguageServerState {
 
     /// Get all files that import a specific type
     pub fn get_files_importing_type(&self, fqn: &Fqn) -> Vec<Url> {
-        self.import_manager
-            .cache()
-            .get_files_importing_type(fqn)
+        self.import_manager.cache().get_files_importing_type(fqn)
     }
 
     /// Atomically ingest a document, updating both content and parsed tree together.
