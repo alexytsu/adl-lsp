@@ -19,24 +19,29 @@ pub fn resolve_import(
     let source_path = Path::new(source_uri.path());
     let source_module_path: Vec<&str> = source_module.split(".").collect();
     let source_module_depth = source_module_path.len();
-    let adl_root = source_path.ancestors().nth(source_module_depth).unwrap();
+    let adl_root = source_path.ancestors().nth(source_module_depth);
+    let source_package_target_path =
+        adl_root.map(|adl| adl.join(format!("{}.adl", imported_module_path.join("/"))));
 
     // Prioritise resolving to the source package (most likely here)
-    let source_package_target_path =
-        adl_root.join(format!("{}.adl", imported_module_path.join("/")));
-
-    if document_exists(&source_package_target_path) {
-        return Some(Url::from_file_path(&source_package_target_path).unwrap());
+    if let Some(ref source_package_target_path) = source_package_target_path {
+        if document_exists(source_package_target_path) {
+            return Some(
+                Url::from_file_path(source_package_target_path).expect("invalid file path"),
+            );
+        }
     }
 
     // Check if the source package is in other package roots
     for root in package_roots {
         let target_path = root.join(format!("{}.adl", imported_module_path.join("/")));
-        if target_path == source_package_target_path {
-            continue;
+        if let Some(ref source_package_target_path) = source_package_target_path {
+            if &target_path == source_package_target_path {
+                continue;
+            }
         }
         if document_exists(&target_path) {
-            return Some(Url::from_file_path(&target_path).unwrap());
+            return Some(Url::from_file_path(&target_path).expect("invalid file path"));
         }
     }
 
@@ -153,9 +158,7 @@ mod tests {
             &source_uri,
             "common.main",
             &vec!["common", "strings"],
-            &|path| {
-                path.starts_with("/project/adl-strings")
-            },
+            &|path| path.starts_with("/project/adl-strings"),
         );
         assert_eq!(
             resolved,

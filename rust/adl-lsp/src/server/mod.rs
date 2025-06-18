@@ -586,8 +586,11 @@ impl Server {
         params: DidChangeTextDocumentParams,
     ) -> ControlFlow<Result<(), Error>> {
         let uri = params.text_document.uri;
-        let contents = params.content_changes.first().unwrap().text.clone();
-        self.ingest_document(&uri, contents);
+        let contents = params.content_changes.first();
+        if let Some(change) = contents {
+            let contents = change.text.clone();
+            self.ingest_document(&uri, contents);
+        }
         ControlFlow::Continue(())
     }
 
