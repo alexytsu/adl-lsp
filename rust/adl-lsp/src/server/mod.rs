@@ -26,6 +26,7 @@ use crate::parser::references::References;
 use crate::parser::symbols::DocumentSymbols;
 use crate::parser::{AdlParser, ParsedTree};
 use crate::server::config::ServerConfig;
+use crate::server::imports::Fqn;
 use crate::server::state::AdlLanguageServerState;
 
 pub mod config;
@@ -246,29 +247,22 @@ impl Server {
         Ok(result)
     }
 
-    fn resolve_import_from_table<F, T: Default>(
+    fn resolve_import_from_table<F, T>(
         &mut self,
-        identifier: &str,
+        import: &Fqn,
         mut process_import: F,
-    ) -> T
+    ) -> Result<T, ResponseError>
     where
-        F: FnMut(&ParsedTree, &str) -> T,
+        F: FnMut(&ParsedTree, &str) -> Result<T, ResponseError>,
     {
         // get the target URI for this identifier from the global imports table
-        if let Some(target_uri) = self.state.get_import_target(identifier) {
-            debug!(
-                "resolving import target location: {} -> {}",
-                identifier,
-                target_uri.path()
-            );
+        if let Some(target_uri) = self.state.get_import_target(import) {
+            debug!("resolved import {:?} to {}", import, target_uri.path());
 
             // Get the target document tree (parse if not already loaded)
             if let Some(target_tree) = self.get_or_parse_document(&target_uri) {
                 if let Some(target_content) = self.state.get_document_content(&target_uri) {
-                    debug!(
-                        "processing import for identifier '{}' in target document",
-                        identifier
-                    );
+                    debug!("processing import {:?} in target document", import);
                     return process_import(&target_tree, &target_content);
                 } else {
                     error!("could not get content for target document: {}", target_uri);
@@ -277,10 +271,13 @@ impl Server {
                 error!("could not parse target document: {}", target_uri);
             }
         } else {
-            error!("no import found in table for identifier: {}", identifier);
+            error!("no import found in table for identifier: {:?}", import);
         }
 
-        T::default()
+        Err(ResponseError::new(
+            ErrorCode::INTERNAL_ERROR,
+            "no import found in table",
+        ))
     }
 
     /// Get a document tree, parsing it if not already loaded
@@ -328,21 +325,36 @@ impl Server {
             return Ok(None);
         };
 
-        let contents_bytes = contents.as_bytes();
-        let Some((identifier, _node)) = tree.get_identifier_at(&position, contents_bytes) else {
+        let contents = contents.as_bytes();
+        let Some((identifier, _node)) = tree.get_identifier_at(&position, contents) else {
             return Ok(None);
         };
+        let definition_location = tree.definition(identifier, contents);
 
-        let mut hover_items = tree.hover(identifier, contents_bytes);
-
-        // check imports if no local definition was found
-        if hover_items.is_empty() {
-            let imported_hover_items = self
-                .resolve_import_from_table(identifier, |tree, contents| {
-                    tree.hover(identifier, contents.as_bytes())
-                });
-            hover_items.extend(imported_hover_items);
-        }
+        let mut hover_items = tree.hover(identifier, contents);
+        match definition_location {
+            Some(DefinitionLocation::Resolved(_location)) => {
+                debug!("found local definition for {}", identifier);
+            }
+            Some(DefinitionLocation::Import(unresolved_import)) => {
+                debug!(
+                    "declaration for {} was imported from {}",
+                    identifier,
+                    unresolved_import.target_module_path.join(".")
+                );
+                let imported_hover_items = self.resolve_import_from_table(
+                    &Fqn::from_module_name_and_type_name(
+                        &unresolved_import.target_module_path.join("."),
+                        identifier,
+                    ),
+                    |tree, contents| Ok(tree.hover(identifier, contents.as_bytes())),
+                )?;
+                hover_items.extend(imported_hover_items);
+            }
+            None => {
+                error!("no definition found for {}", identifier);
+            }
+        };
 
         Ok(Some(Hover {
             contents: HoverContents::Array(hover_items),
@@ -379,26 +391,31 @@ impl Server {
                 debug!("found local definition for {}", identifier);
                 Ok(Some(GotoDefinitionResponse::Scalar(location)))
             }
-            Some(DefinitionLocation::Import(_unresolved_import)) => {
-                // TODO: _unresolved import doesn't really need any information on it, since using the import table allows us to resolve via the identifier name
+            Some(DefinitionLocation::Import(unresolved_import)) => {
                 debug!(
                     "declaration for {} was imported from {}",
                     identifier,
-                    _unresolved_import.target_module_path.join(".")
+                    unresolved_import.target_module_path.join(".")
                 );
-                let resolved_import =
-                    self.resolve_import_from_table(identifier, |tree, contents| {
+                let resolved_import = self.resolve_import_from_table(
+                    &Fqn::from_module_name_and_type_name(
+                        &unresolved_import.target_module_path.join("."),
+                        identifier,
+                    ),
+                    |tree, contents| {
                         let definition_location = tree.definition(identifier, contents.as_bytes());
                         match definition_location {
-                            Some(DefinitionLocation::Resolved(location)) => Some(location),
-                            // if resolved import not found, use _unresolved_import to parse the target document
-                            // however, this shouldn't happen, because we already built the import table when we parsed the source document
+                            Some(DefinitionLocation::Resolved(location)) => Ok(Some(location)),
                             Some(DefinitionLocation::Import(_)) | None => {
                                 error!("import not resolved after lookup in import table");
-                                None
+                                Err(ResponseError::new(
+                                    ErrorCode::INTERNAL_ERROR,
+                                    "import not resolved after lookup in import table",
+                                ))
                             }
                         }
-                    });
+                    },
+                )?;
 
                 Ok(resolved_import.map(GotoDefinitionResponse::Scalar))
             }
@@ -417,8 +434,8 @@ impl Server {
             return Ok(None);
         };
 
-        let contents_bytes = contents.as_bytes();
-        let Some((identifier, node)) = tree.get_identifier_at(&position, contents_bytes) else {
+        let contents = contents.as_bytes();
+        let Some((identifier, node)) = tree.get_identifier_at(&position, contents) else {
             return Ok(None);
         };
 
@@ -431,11 +448,20 @@ impl Server {
         let mut all_references = Vec::new();
 
         // First, find references in the current file
-        let local_references = tree.find_references(identifier, contents_bytes);
+        let local_references = tree.find_references(identifier, contents);
         all_references.extend(local_references);
+        let module_name = tree.get_module_name(contents).ok_or_else(|| {
+            error!("could not get module name for document: {}", uri);
+            ResponseError::new(ErrorCode::INTERNAL_ERROR, "could not get module name")
+        })?;
 
         // Then, find all files that import this identifier
-        let importing_files = self.state.get_files_importing_identifier(identifier);
+        let importing_files =
+            self.state
+                .get_files_importing_type(&Fqn::from_module_name_and_type_name(
+                    module_name,
+                    identifier,
+                ));
         debug!(
             "found {} files importing identifier '{}'",
             importing_files.len(),
@@ -473,7 +499,7 @@ impl Server {
 
         // Include definition if requested
         if params.context.include_declaration {
-            let definition_location = tree.definition(identifier, contents_bytes);
+            let definition_location = tree.definition(identifier, contents);
             if let Some(DefinitionLocation::Resolved(location)) = definition_location {
                 all_references.push(location);
             }

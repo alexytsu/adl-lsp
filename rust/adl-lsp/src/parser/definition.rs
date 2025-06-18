@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 use tree_sitter::Node;
 
-use crate::node::NodeKind;
+use crate::node::{AdlImportDeclaration, NodeKind};
 use crate::parser::ParsedTree;
 use crate::parser::tree::Tree;
 use crate::parser::ts_lsp_interop;
@@ -11,7 +11,7 @@ use crate::parser::ts_lsp_interop;
 #[derive(Clone, Debug)]
 enum DefinitionKind<'a> {
     Definition(Node<'a>),
-    Import(Node<'a>, String),
+    Import(AdlImportDeclaration<'a>, String),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -48,9 +48,14 @@ impl ParsedTree {
         NodeKind::is_definition(node) || node.parent().is_some_and(|p| Self::is_from_definition(&p))
     }
 
-    pub fn is_from_import_declaration<'a>(node: &Node<'a>) -> (bool, Option<Node<'a>>) {
+    pub fn is_from_import_declaration<'a>(
+        node: &Node<'a>,
+    ) -> (bool, Option<AdlImportDeclaration<'a>>) {
         if NodeKind::is_import_declaration(node) {
-            (true, Some(*node))
+            (
+                true,
+                Some(AdlImportDeclaration::try_new(*node).expect("expected import_declaration")),
+            )
         } else {
             node.parent()
                 .map_or((false, None), |p| Self::is_from_import_declaration(&p))
@@ -92,19 +97,27 @@ impl ParsedTree {
                 .find_all_nodes_from(n, NodeKind::is_scoped_name)
                 .into_iter()
                 .filter(|scoped_node| {
-                    let scoped_text = scoped_node.utf8_text(content.as_ref()).expect("utf-8 parse error");
+                    let scoped_text = scoped_node
+                        .utf8_text(content.as_ref())
+                        .expect("utf-8 parse error");
                     // Check if the scoped name ends with our identifier (e.g., "common.string.StringNE" ends with "StringNE")
                     scoped_text.ends_with(&format!(".{}", identifier)) || scoped_text == identifier
                 })
                 .map(|scoped_node| {
                     // For scoped names, we treat them as imports that need to be resolved
-                    let scoped_text = scoped_node.utf8_text(content.as_ref()).expect("utf-8 parse error");
+                    let scoped_text = scoped_node
+                        .utf8_text(content.as_ref())
+                        .expect("utf-8 parse error");
                     let parts: Vec<&str> = scoped_text.split('.').collect();
                     if parts.len() > 1 {
                         // Create an unresolved import for the scoped name
                         DefinitionLocation::Import(UnresolvedImport {
-                            source_module: Self::get_source_module(&scoped_node, &content).unwrap_or_default(),
-                            target_module_path: parts[..parts.len() - 1].iter().map(|s| s.to_string()).collect(),
+                            source_module: Self::get_source_module(&scoped_node, &content)
+                                .unwrap_or_default(),
+                            target_module_path: parts[..parts.len() - 1]
+                                .iter()
+                                .map(|s| s.to_string())
+                                .collect(),
                             identifier: identifier.to_string(),
                         })
                     } else {
@@ -112,8 +125,12 @@ impl ParsedTree {
                         DefinitionLocation::Resolved(Location {
                             uri: self.uri.clone(),
                             range: Range {
-                                start: ts_lsp_interop::ts_to_lsp_position(&scoped_node.start_position()),
-                                end: ts_lsp_interop::ts_to_lsp_position(&scoped_node.end_position()),
+                                start: ts_lsp_interop::ts_to_lsp_position(
+                                    &scoped_node.start_position(),
+                                ),
+                                end: ts_lsp_interop::ts_to_lsp_position(
+                                    &scoped_node.end_position(),
+                                ),
                             },
                         })
                     }
@@ -141,19 +158,16 @@ impl ParsedTree {
                 })
             }
             DefinitionKind::Import(import_declaration, identifier) => {
-                // resolve the import path to the form e.g. "common.strings.StringML"
-                let import_path = import_declaration.child(1).unwrap();
-                let import_path_text = import_path.utf8_text(content.as_ref()).unwrap();
-
-                let import_module_path: Vec<String> =
-                    import_path_text.split(".").map(|s| s.into()).collect();
-                let import_module_path = &import_module_path[..import_module_path.len() - 1];
-                debug!("Import: {:?}", import_path_text);
-
                 DefinitionLocation::Import(UnresolvedImport {
-                    // keep going up the tree to find the source module
-                    source_module: Self::get_source_module(&import_declaration, &content).unwrap(),
-                    target_module_path: import_module_path.to_vec(),
+                    source_module: self
+                        .get_module_name(content.as_ref())
+                        .expect("expected module name")
+                        .to_string(),
+                    target_module_path: import_declaration
+                        .module_name(content.as_ref())
+                        .split(".")
+                        .map(|s| s.to_string())
+                        .collect(),
                     identifier, // could be common, strings or StringML
                 })
             }

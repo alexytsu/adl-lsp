@@ -1,49 +1,52 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::sync::{Arc, RwLock};
 
 use async_lsp::lsp_types::Url;
 use tracing::{debug, trace};
 
-use crate::node::NodeKind;
+use crate::node::{AdlImportDeclaration, AdlModuleDefinition, NodeKind};
 use crate::parser::ParsedTree;
-use crate::parser::definition::UnresolvedImport;
 use crate::parser::tree::Tree;
 use crate::server::modules;
+
+mod fqn;
+pub use fqn::Fqn;
 
 /// A table that caches resolved imports to avoid repeated tree traversals
 #[derive(Debug, Clone, Default)]
 pub struct ImportsCache {
-    /// Maps identifier -> target_uri where the symbol is defined
+    /// Maps FQN -> target_uri where the symbol is defined
     /// Since ADL workspaces cannot have duplicate symbol definitions,
     /// each identifier maps to exactly one location
-    definition_locations: Arc<RwLock<HashMap<String, Url>>>,
+    definition_locations: Arc<RwLock<HashMap<Fqn, Url>>>,
 
-    /// Maps source_uri -> set of all identifiers it imports
+    /// Maps source_uri -> set of all FQNs it imports
     /// Used for efficient invalidation when a document changes
-    imported_symbols: Arc<RwLock<HashMap<Url, HashSet<String>>>>,
+    imported_symbols: Arc<RwLock<HashMap<Url, HashSet<Fqn>>>>,
 
-    /// Maps source_uri -> set of all identifiers it defines
+    /// Maps source_uri -> set of all FQNs it defines
     /// Used for efficient invalidation when a document changes
-    defined_symbols: Arc<RwLock<HashMap<Url, HashSet<String>>>>,
+    defined_symbols: Arc<RwLock<HashMap<Url, HashSet<Fqn>>>>,
 }
 
 impl ImportsCache {
     /// Attempt to lookup the uri where an identifier is defined
-    pub fn lookup_identifier(&self, identifier: &str) -> Option<Url> {
+    pub fn lookup_fqn(&self, fqn: &Fqn) -> Option<Url> {
         self.definition_locations
             .read()
             .expect("poisoned")
-            .get(identifier)
+            .get(fqn)
             .cloned()
     }
 
-    /// Get all files that import a specific identifier
-    pub fn get_files_importing_identifier(&self, identifier: &str) -> Vec<Url> {
+    /// Get all files that import a specific type
+    pub fn get_files_importing_type(&self, fqn: &Fqn) -> Vec<Url> {
         let imported_symbols = self.imported_symbols.read().expect("poisoned");
         imported_symbols
             .iter()
             .filter_map(|(uri, symbols)| {
-                if symbols.contains(identifier) {
+                if symbols.contains(fqn) {
                     Some(uri.clone())
                 } else {
                     None
@@ -53,70 +56,54 @@ impl ImportsCache {
     }
 
     /// Add a validated import to the table, registering its import and definition
-    fn add_import(&self, source_uri: &Url, identifier: &String, target_uri: &Url) {
-        {
-            let mut definition_locations = self.definition_locations.write().expect("poisoned");
-            definition_locations.insert(identifier.into(), target_uri.clone());
-        }
+    fn add_import(&self, source_uri: &Url, fqn: &Fqn, target_uri: &Url) {
+        let mut definition_locations = self.definition_locations.write().expect("poisoned");
+        let mut imported_symbols = self.imported_symbols.write().expect("poisoned");
+        let mut defined_symbols = self.defined_symbols.write().expect("poisoned");
 
-        {
-            let mut imported_symbols = self.imported_symbols.write().expect("poisoned");
-            imported_symbols
-                .entry(source_uri.clone())
-                .or_default()
-                .insert(identifier.into());
-        }
-
-        {
-            let mut defined_symbols = self.defined_symbols.write().expect("poisoned");
-            defined_symbols
-                .entry(target_uri.clone())
-                .or_default()
-                .insert(identifier.into());
-        }
+        definition_locations.insert(fqn.clone(), target_uri.clone());
+        imported_symbols
+            .entry(source_uri.clone())
+            .or_default()
+            .insert(fqn.clone());
+        defined_symbols
+            .entry(target_uri.clone())
+            .or_default()
+            .insert(fqn.clone());
     }
 
     /// Add a definition to the table (for symbols defined in a file)
-    fn add_definition(&self, source_uri: &Url, identifier: &str) {
-        {
-            let mut definition_locations = self.definition_locations.write().expect("poisoned");
-            definition_locations.insert(identifier.to_string(), source_uri.clone());
-        }
+    fn add_definition(&self, source_uri: &Url, fqn: &Fqn) {
+        let mut definition_locations = self.definition_locations.write().expect("poisoned");
+        let mut defined_symbols = self.defined_symbols.write().expect("poisoned");
 
-        {
-            let mut defined_symbols = self.defined_symbols.write().expect("poisoned");
-            defined_symbols
-                .entry(source_uri.clone())
-                .or_default()
-                .insert(identifier.to_string());
-        }
+        definition_locations.insert(fqn.clone(), source_uri.clone());
+        defined_symbols
+            .entry(source_uri.clone())
+            .or_default()
+            .insert(fqn.clone());
     }
 
     /// Clear all imports and definitions for a given source URI that has been updated
     fn clear_source_caches(&self, source_uri: &Url) {
+        let mut imported_symbols = self.imported_symbols.write().expect("poisoned");
+        let mut definition_table = self.defined_symbols.write().expect("poisoned");
+        let mut definition_locations = self.definition_locations.write().expect("poisoned");
+
         trace!(
             "clearing imports and definitions for source file: {}",
             source_uri.path()
         );
 
         // Remove the import cache for this source
-        {
-            let mut imported_symbols = self.imported_symbols.write().expect("poisoned");
-            imported_symbols.remove(source_uri).unwrap_or_default();
-        }
+        imported_symbols.remove(source_uri).unwrap_or_default();
 
         // Remove the definition cache for this source
-        let definitions = {
-            let mut definitions = self.defined_symbols.write().expect("poisoned");
-            definitions.remove(source_uri).unwrap_or_default()
-        };
+        let definitions = { definition_table.remove(source_uri).unwrap_or_default() };
 
         // Remove the definition locations for all symbols in this source
-        {
-            let mut definition_locations = self.definition_locations.write().expect("poisoned");
-            for identifier in definitions {
-                definition_locations.remove(&identifier);
-            }
+        for identifier in definitions {
+            definition_locations.remove(&identifier);
         }
     }
 }
@@ -148,8 +135,8 @@ impl ImportManager for ImportsCache {
         &self,
         package_roots: &[std::path::PathBuf],
         source_uri: &Url,
-        tree: &ParsedTree,
-        content: &[u8],
+        source_tree: &ParsedTree,
+        source_content: &[u8],
         get_or_parse_document_tree: &mut impl FnMut(&Url) -> Option<ParsedTree>,
     ) {
         trace!("resolving imports for document: {}", source_uri);
@@ -158,17 +145,26 @@ impl ImportManager for ImportsCache {
         self.clear_source_caches(source_uri);
 
         // Register all type definitions in this document
-        self.register_document_definitions(source_uri, tree, content);
+        self.register_document_definitions(source_uri, source_tree, source_content);
 
         // Find all import declarations in the document
-        let import_nodes = tree.find_all_nodes(NodeKind::is_import_declaration);
+        let import_nodes = source_tree.find_all_nodes(NodeKind::is_import_declaration);
+
+        let module_definition = source_tree
+            .find_first_node(NodeKind::is_module_definition)
+            .expect("expected module definition");
+        let module_definition =
+            AdlModuleDefinition::try_new(module_definition).expect("expected module definition");
 
         for import_node in import_nodes {
+            let import_node =
+                AdlImportDeclaration::try_new(import_node).expect("expected import_declaration");
             self.process_import_declaration(
                 package_roots,
                 source_uri,
+                module_definition.module_name(source_content),
+                source_content,
                 &import_node,
-                content,
                 get_or_parse_document_tree,
             );
         }
@@ -194,52 +190,34 @@ impl ImportsCache {
         &self,
         package_roots: &[std::path::PathBuf],
         source_uri: &Url,
-        import_node: &tree_sitter::Node,
-        content: &[u8],
+        source_module: &str,
+        source_content: &[u8],
+        import_node: &AdlImportDeclaration,
         get_or_parse_document_tree: &mut impl FnMut(&Url) -> Option<ParsedTree>,
     ) {
-        // Extract import path from the import declaration
-        if let Some(import_path_node) = import_node.child(1) {
-            let import_path_text = import_path_node.utf8_text(content).unwrap_or("");
-
-            // Parse the import path
-            let parts: Vec<&str> = import_path_text.split('.').collect();
-            if parts.is_empty() {
-                return;
+        match import_node {
+            AdlImportDeclaration::FullyQualified(_) => {
+                // Extract imported FQN from the import declaration
+                let fqn = Fqn::from_module_name_and_type_name(
+                    import_node.module_name(source_content),
+                    import_node
+                        .imported_type_name(source_content)
+                        .expect(" expected FullyQualified import to have a type_name "),
+                );
+                self.resolve_fully_qualified_import(package_roots, source_uri, source_module, &fqn);
             }
-
-            let source_module =
-                &ParsedTree::get_source_module(import_node, content).unwrap_or_default();
-
-            // Check if this is a star import (ends with *)
-            if parts.last() == Some(&"*") {
-                // Star import - expand by visiting the target module
-                let target_module_path: Vec<String> = parts[..parts.len() - 1]
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect();
-
+            AdlImportDeclaration::StarImport(_) => {
+                let imported_module_path =
+                    import_node.module_name(source_content).split('.').collect();
+                // let imported_module_tree =
+                //     &ParsedTree::get_source_module(import_node.inner(), source_content)
+                //         .unwrap_or_default();
                 self.expand_star_import(
                     package_roots,
                     source_uri,
                     source_module,
-                    &target_module_path,
+                    &imported_module_path,
                     get_or_parse_document_tree,
-                );
-            } else {
-                // Regular import - just the last identifier
-                let identifier = parts.last().unwrap().to_string();
-                let target_module_path: Vec<String> = parts[..parts.len() - 1]
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect();
-
-                self.resolve_regular_import(
-                    package_roots,
-                    source_uri,
-                    source_module,
-                    &target_module_path,
-                    &identifier,
                 );
             }
         }
@@ -251,22 +229,20 @@ impl ImportsCache {
         package_roots: &[std::path::PathBuf],
         source_uri: &Url,
         source_module: &str,
-        target_module_path: &Vec<String>,
+        imported_module_path: &Vec<&str>,
         get_or_parse_document_tree: &mut impl FnMut(&Url) -> Option<ParsedTree>,
     ) {
-        debug!("expanding star import from {:?}", target_module_path);
+        debug!("expanding star import from {:?}", imported_module_path);
 
-        // Create an unresolved import to find the target module
-        let unresolved = UnresolvedImport {
-            source_module: source_module.into(),
-            target_module_path: target_module_path.clone(),
-            identifier: "*".to_string(),
-        };
+        let imported_module = modules::resolve_import(
+            package_roots,
+            source_uri,
+            source_module,
+            imported_module_path,
+            &|path| fs::exists(path).is_ok_and(|exists| exists),
+        );
 
-        // Resolve the module paths
-        let possible_paths = modules::resolve_import(package_roots, source_uri, &unresolved);
-
-        for ref target_uri in possible_paths {
+        if let Some(ref target_uri) = imported_module {
             // Try to read the target module
             if let Ok(target_content) = std::fs::read_to_string(target_uri.path()) {
                 // Get or parse the target tree
@@ -285,25 +261,28 @@ impl ImportsCache {
     }
 
     /// Find all type definition names in a parsed tree
-    fn find_type_definitions(&self, tree: &ParsedTree, content: &[u8]) -> Vec<String> {
+    fn find_type_definitions(&self, tree: &ParsedTree, content: &[u8]) -> Vec<Fqn> {
         let mut type_names = Vec::new();
 
-        // Find all type definition nodes
-        let type_def_nodes = tree.find_all_nodes(|node| {
-            NodeKind::is_type_definition(node)
-                || NodeKind::is_struct_definition(node)
-                || NodeKind::is_union_definition(node)
-                || NodeKind::is_newtype_definition(node)
-        });
+        let module_definition = tree
+            .find_first_node(NodeKind::is_module_definition)
+            .expect("expected module definition");
+        let module_definition =
+            AdlModuleDefinition::try_new(module_definition).expect("expected module definition");
+        let module_name = module_definition.module_name(content);
 
-        for node in type_def_nodes {
-            // The type name is typically the first child that is a type_name
-            if let Some(type_name_node) = node
-                .children(&mut node.walk())
+        // Find all types defined locally in this module
+        let type_def_nodes = tree.find_all_nodes(NodeKind::is_local_definition);
+
+        for type_def in type_def_nodes {
+            // TODO: create an AdlNode here to handle the type name logic
+            // The type name is the first child that is a type_name
+            if let Some(type_name_node) = type_def
+                .children(&mut type_def.walk())
                 .find(|child| NodeKind::is_type_name(child))
             {
                 if let Ok(type_name) = type_name_node.utf8_text(content) {
-                    type_names.push(type_name.to_string());
+                    type_names.push(Fqn::from_module_name_and_type_name(module_name, type_name));
                 }
             }
         }
@@ -312,31 +291,26 @@ impl ImportsCache {
         type_names
     }
 
-    /// Resolve a regular (non-star) import
-    fn resolve_regular_import(
+    /// Resolve a fully-qualified import
+    fn resolve_fully_qualified_import(
         &self,
         package_roots: &[std::path::PathBuf],
         source_uri: &Url,
         source_module: &str,
-        target_module_path: &Vec<String>,
-        identifier: &String,
+        import: &Fqn,
     ) {
-        debug!(
-            "resolving regular import: {} from {:?}",
-            identifier, target_module_path
-        );
-
-        // Create an unresolved import to find the target module
-        let unresolved = UnresolvedImport {
-            source_module: source_module.into(),
-            target_module_path: target_module_path.clone(),
-            identifier: identifier.clone(),
-        };
+        debug!("resolving fully-qualified import: {:?}", import);
 
         // Resolve the module paths
-        let possible_paths = modules::resolve_import(package_roots, source_uri, &unresolved);
+        let possible_paths = modules::resolve_import(
+            package_roots,
+            source_uri,
+            source_module,
+            &import.module_path(),
+            &|path| fs::exists(path).is_ok_and(|exists| exists),
+        );
 
-        for ref target_uri in possible_paths {
+        if let Some(ref target_uri) = possible_paths {
             // Only add the symbol if the target file actually exists
             if std::fs::metadata(target_uri.path()).is_ok() {
                 trace!(
@@ -344,7 +318,7 @@ impl ImportsCache {
                     target_uri.path()
                 );
                 // TODO: check if the target file actually contains the definition
-                self.add_import(source_uri, identifier, target_uri);
+                self.add_import(source_uri, import, target_uri);
             } else {
                 trace!(
                     "target file does not exist, skipping: {}",

@@ -1,6 +1,11 @@
 use async_lsp::lsp_types::Url;
 use std::sync::Arc;
-use tree_sitter::Tree;
+use tree_sitter::Tree as TsTree;
+
+use crate::{
+    node::{AdlModuleDefinition, NodeKind},
+    parser::tree::Tree,
+};
 
 pub mod definition;
 pub mod diagnostics;
@@ -17,7 +22,7 @@ pub struct AdlParser {
 #[derive(Clone)]
 pub struct ParsedTree {
     pub uri: Url,
-    tree: Arc<Tree>,
+    tree: Arc<TsTree>,
 }
 
 impl AdlParser {
@@ -40,5 +45,13 @@ impl AdlParser {
 impl Default for AdlParser {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ParsedTree {
+    pub fn get_module_name<'c>(&self, content: &'c [u8]) -> Option<&'c str> {
+        let module_body_node = self.find_first_node(NodeKind::is_module_definition)?;
+        let module_body_node = AdlModuleDefinition::try_new(module_body_node)?;
+        Some(module_body_node.module_name(content))
     }
 }

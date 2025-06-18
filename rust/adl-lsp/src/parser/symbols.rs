@@ -167,23 +167,22 @@ mod test {
         let mut parser = AdlParser::new();
         let uri = Url::parse("file:///test.adl").unwrap();
         let content = r#"
-module sample.simple {
-    struct Person {
-        String name;
-        Int age;
-    };
+            module sample.simple {
+                struct Person {
+                    String name;
+                    Int age;
+                };
 
-    union Color {
-        Void red;
-        Void green;
-        Void blue;
-    };
+                union Color {
+                    Void red;
+                    Void green;
+                    Void blue;
+                };
 
-    type UserId = Int32;
+                type UserId = Int32;
 
-    newtype Email = String;
-};
-"#;
+                newtype Email = String;
+            };"#;
 
         let tree = parser.parse(uri, content.as_bytes()).unwrap();
         let symbols = tree.collect_document_symbols(content.as_bytes());

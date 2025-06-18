@@ -7,7 +7,7 @@ use tracing::debug;
 
 use crate::parser::symbols::DocumentSymbols;
 use crate::parser::{AdlParser, ParsedTree};
-use crate::server::imports::{ImportManager, ImportsCache};
+use crate::server::imports::{Fqn, ImportManager, ImportsCache};
 
 /// ADL Language Server state that manages documents and their parsed trees.
 /// Provides atomic operations to ensure document content and tree are updated together.
@@ -25,15 +25,15 @@ impl AdlLanguageServerState {
     }
 
     /// Get the target URI for an identifier from the imports table
-    pub fn get_import_target(&self, identifier: &str) -> Option<Url> {
-        self.import_manager.cache().lookup_identifier(identifier)
+    pub fn get_import_target(&self, fqn: &Fqn) -> Option<Url> {
+        self.import_manager.cache().lookup_fqn(fqn)
     }
 
-    /// Get all files that import a specific identifier
-    pub fn get_files_importing_identifier(&self, identifier: &str) -> Vec<Url> {
+    /// Get all files that import a specific type
+    pub fn get_files_importing_type(&self, fqn: &Fqn) -> Vec<Url> {
         self.import_manager
             .cache()
-            .get_files_importing_identifier(identifier)
+            .get_files_importing_type(fqn)
     }
 
     /// Atomically ingest a document, updating both content and parsed tree together.

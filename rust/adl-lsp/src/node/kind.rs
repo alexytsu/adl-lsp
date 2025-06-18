@@ -1,10 +1,14 @@
 #![allow(dead_code)]
+//! The full grammar sepcification the of ADL's AST from tree-sitter-adl
 use tree_sitter::Node;
 
+/// Typed parsing of node.kind() strings from a tree-sitter parse tree
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
     // Comments and Documentation
     Comment,
     Docstring,
+    DefinitionPreamble,
 
     // Identifiers and Names
     Identifier,
@@ -54,6 +58,13 @@ impl NodeKind {
         Self::is_identifier(n) || Self::is_type_name(n) || Self::is_scoped_name(n)
     }
 
+    pub fn is_local_definition(n: &Node) -> bool {
+        Self::is_type_definition(n)
+            || Self::is_newtype_definition(n)
+            || Self::is_struct_definition(n)
+            || Self::is_union_definition(n)
+    }
+
     pub fn is_definition(n: &Node) -> bool {
         Self::is_import_declaration(n) || Self::is_type_name(n) || Self::is_import_declaration(n)
     }
@@ -76,6 +87,7 @@ impl NodeKind {
             // Comments and Documentation
             "comment" => Self::Comment,
             "docstring" => Self::Docstring,
+            "definition_preamble" => Self::DefinitionPreamble,
 
             // Identifiers and Names
             "identifier" => Self::Identifier,
@@ -126,6 +138,7 @@ impl NodeKind {
             // Comments and Documentation
             Self::Comment => "comment",
             Self::Docstring => "docstring",
+            Self::DefinitionPreamble => "definition_preamble",
 
             // Identifiers and Names
             Self::Identifier => "identifier",
@@ -178,6 +191,10 @@ impl NodeKind {
 
     pub fn is_docstring(n: &Node) -> bool {
         n.kind() == Self::Docstring.as_str()
+    }
+
+    pub fn is_definition_preamble(n: &Node) -> bool {
+        n.kind() == Self::DefinitionPreamble.as_str()
     }
 
     // Identifiers and Names
