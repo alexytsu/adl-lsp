@@ -3,6 +3,12 @@
 All notable changes to the "alexytsu.adl-vscode" extension will be documented in
 this file.
 
+## [0.2.3] - 2025-06-19
+
+Resolves imports via fully qualified names rather than purely looking at the identifier name
+Reports diagnostics for missing tokens
+Reloads config when `adl.packageRoots` is updated
+
 ## [0.2.2] - 2025-06-17
 
 Logos for ADL files

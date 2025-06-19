@@ -5,7 +5,7 @@
   "repository": "https://github.com/alexytsu/adl-lsp",
   "icon": "assets/adl-icon.png",
   "publisher": "alexytsu",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "engines": {
     "vscode": "^1.90.0"
   },
