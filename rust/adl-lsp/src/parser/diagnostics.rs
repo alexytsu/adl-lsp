@@ -12,10 +12,11 @@ impl ParsedTree {
         // first collect parse errors
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
         self.collect_parse_diagnostics(&mut diagnostics);
-
+        self.collect_parse_diagnostics_missing(&mut diagnostics);
         if let Some(import_diagnostics) = self.collect_import_diagnostics() {
             diagnostics.extend(import_diagnostics);
         }
+        debug!("collect_diagnostics: {:?}", diagnostics);
         diagnostics
     }
 
@@ -32,6 +33,28 @@ impl ParsedTree {
                     source: Some("adl-vscode".to_string()), // TODO: maybe make this set at CLI?
                     message: "Syntax error".to_string(),
                     ..Default::default()
+                }),
+        );
+    }
+
+    pub fn collect_parse_diagnostics_missing(&self, diagnostics: &mut Vec<Diagnostic>) {
+        diagnostics.extend(
+            self.find_all_nodes(NodeKind::is_missing)
+                .into_iter()
+                .map(|n| Diagnostic {
+                    range: Range {
+                        start: ts_to_lsp_position(&n.start_position()),
+                        end: ts_to_lsp_position(&n.end_position()),
+                    },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("adl-vscode".to_string()), // TODO: maybe make this set at CLI?
+                    message: "Missing token '".to_string() + n.kind() + "'",
+                    code: None,
+                    // code: Some(NumberOrString::String(n.kind().to_string())),
+                    code_description: None,
+                    data: None,
+                    related_information: None,
+                    tags: None,
                 }),
         );
     }

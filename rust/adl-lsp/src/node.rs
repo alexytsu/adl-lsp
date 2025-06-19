@@ -298,4 +298,8 @@ impl NodeKind {
     pub fn is_error(n: &Node) -> bool {
         n.kind() == Self::Error.as_str()
     }
+
+    pub fn is_missing(n: &Node) -> bool {
+        n.is_missing()
+    }
 }
