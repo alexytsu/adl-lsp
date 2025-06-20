@@ -52,8 +52,8 @@
         ],
         "configuration": "./language-configuration.json",
         "icon": {
-          "light": "assets/adl-file-light.png",
-          "dark": "assets/adl-file-dark.png"
+          "light": "assets/adl_lower_overlap_3.png",
+          "dark": "assets/adl_lower_overlap.png"
         }
       }
     ],
