@@ -46,14 +46,21 @@ This repo implements a VSCode client extension that is published to the [marketp
 
 ```toml
 [[language]]
-name = "algebraic-data-language"
-scope = "source.adl"
+name = "adl"
 language-id = "adl"
-file-types = ["adl", "adl-cpp", "adl-hs", "adl-java", "adl-hs", "adl-rs", "adl-ts"]
-roots = [".git"]
-comment-tokens = ["//", "///", "//!"]
+scope = "source.adl"
+injection-regex = "adl"
+file-types = ["adl", "adl-cpp", "adl-hs", "adl-java", "adl-rs", "adl-ts"]
+comment-token = "//"
+indent = { tab-width = 2, unit = "  " }
+roots = []
 language-servers = ["adl-lsp"]
 workspace-lsp-roots = ["adl"]
+
+[language.auto-pairs]
+'"' = '"'
+'{' = '}'
+'<' = '>'
 
 [language-server.adl-lsp]
 command = "adl-lsp"
