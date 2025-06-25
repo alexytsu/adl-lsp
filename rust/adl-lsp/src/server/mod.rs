@@ -19,7 +19,7 @@ use lsp_types::{
     WorkspaceServerCapabilities,
 };
 use lsp_types::{notification, request};
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use crate::node::NodeKind;
 use crate::parser::definition::{Definition, DefinitionLocation};
@@ -187,6 +187,7 @@ impl Server {
 
                 if path.is_dir() {
                     // Skip hidden directories and common build/output directories
+                    // TODO: look for .gitignore files and also ignore them
                     if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
                         if !dir_name.starts_with('.')
                             && dir_name != "target"
@@ -198,7 +199,7 @@ impl Server {
                         }
                     }
                 } else if path.extension().and_then(|ext| ext.to_str()) == Some("adl") {
-                    debug!("Found ADL file: {}", path.display());
+                    debug!("found ADL file: {}", path.display());
                     adl_files.push(path);
                 }
             }
@@ -674,6 +675,9 @@ impl Server {
         let uri = params.text_document.uri;
         if let Some(contents) = params.text {
             self.ingest_document(&uri, contents);
+        } else {
+            // NOTE: if there's no contents then this is unexpected but we could read the contents from the uri directly
+            warn!("text file saved with no contents");
         }
         ControlFlow::Continue(())
     }

@@ -1,7 +1,7 @@
 use async_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 use tracing::debug;
 
-use crate::node::NodeKind;
+use crate::node::{AdlModuleBody, NodeKind};
 use crate::parser::tree::Tree;
 use crate::parser::ts_lsp_interop::ts_to_lsp_position;
 
@@ -12,7 +12,7 @@ impl ParsedTree {
         if content.trim().is_empty() {
             return vec![Diagnostic {
                 severity: Some(DiagnosticSeverity::WARNING),
-                message: "Empty file".to_string(),
+                message: "empty file".to_string(),
                 ..Default::default()
             }];
         }
@@ -41,7 +41,7 @@ impl ParsedTree {
                         end: ts_to_lsp_position(&n.end_position()),
                     },
                     severity: Some(DiagnosticSeverity::ERROR),
-                    message: "Syntax error".to_string(),
+                    message: "syntax error".to_string(),
                     ..Default::default()
                 }),
         );
@@ -57,7 +57,7 @@ impl ParsedTree {
                         end: ts_to_lsp_position(&n.end_position()),
                     },
                     severity: Some(DiagnosticSeverity::ERROR),
-                    message: "Missing token '".to_string() + n.kind() + "'",
+                    message: "missing token '".to_string() + n.kind() + "'",
                     ..Default::default()
                 }),
         );
@@ -65,8 +65,9 @@ impl ParsedTree {
 
     pub fn collect_import_diagnostics(&self) -> Option<Vec<Diagnostic>> {
         let imports = self.find_all_nodes(NodeKind::is_import_declaration);
-        let module_body_children = self.find_first_node(NodeKind::is_module_body)?;
-        let mut cursor = module_body_children.walk();
+
+        let module_body = AdlModuleBody::try_new(self.find_first_node(NodeKind::is_module_body)?)?;
+        let mut cursor = module_body.cursor();
         cursor.goto_first_child(); // opening module brace
 
         let mut first_non_import = None;
@@ -79,16 +80,11 @@ impl ParsedTree {
                 first_non_import = Some(node);
                 break;
             }
-            cursor.goto_next_sibling();
         }
 
         let first_non_import = first_non_import?;
 
-        debug!("first_non_import: {:?}", first_non_import.kind());
-
-        // TODO: attempt to resolve the imports and report errors for invalid imports
-
-        let diagnostics = imports
+        let out_of_order_imports = imports
             .iter()
             .filter_map(|node| {
                 // imports should only be at the top of a module
@@ -98,14 +94,10 @@ impl ParsedTree {
                             start: ts_to_lsp_position(&node.start_position()),
                             end: ts_to_lsp_position(&node.end_position()),
                         },
-                        message: "Imports must be at the top of a module".to_string(),
+                        message: "imports must be declared at the beginning of a module"
+                            .to_string(),
                         severity: Some(DiagnosticSeverity::ERROR),
-                        code: None,
-                        code_description: None,
-                        source: Some("adl-lsp".to_string()),
-                        related_information: None,
-                        tags: None,
-                        data: None,
+                        ..Default::default()
                     })
                 } else {
                     None
@@ -113,7 +105,9 @@ impl ParsedTree {
             })
             .collect();
 
-        Some(diagnostics)
+        // TODO: attempt to resolve the imports and report errors for invalid imports
+
+        Some(out_of_order_imports)
     }
 }
 

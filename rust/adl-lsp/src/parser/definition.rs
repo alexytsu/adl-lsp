@@ -148,7 +148,7 @@ impl ParsedTree {
     ) -> DefinitionLocation {
         match d {
             DefinitionKind::Definition(n) => {
-                debug!("Definition: {:?}", n.utf8_text(content.as_ref()));
+                debug!("definition: {:?}", n.utf8_text(content.as_ref()));
                 DefinitionLocation::Resolved(Location {
                     uri: self.uri.clone(),
                     range: Range {

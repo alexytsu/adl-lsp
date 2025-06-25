@@ -1,7 +1,8 @@
 mod kind;
+
 pub use kind::NodeKind;
 use tracing::warn;
-use tree_sitter::Node;
+use tree_sitter::{Node, TreeCursor};
 
 /// Type-safe helpers to perform operations on known-node types
 #[allow(dead_code)]
@@ -9,6 +10,7 @@ pub enum AdlNode<'a> {
     Import(AdlImportDeclaration<'a>),
     ScopedName(AdlScopedName<'a>),
     ModuleDefinition(AdlModuleDefinition<'a>),
+    ModuleBody(AdlModuleBody<'a>),
 }
 
 /// A module definition provides a namespace for types and functions that are defined within it
@@ -205,5 +207,44 @@ mod test {
             import_declarations[1].imported_type_name(SAMPLE_ADL.as_bytes()),
             None
         );
+    }
+}
+
+/// A module body contains imports, type definitions and annotation declarations
+///
+/// ## Grammar Definition
+/// ```javascript
+/// module_body: ($) =>
+///   seq(
+///     "{",
+///     repeat(
+///       choice(
+///         $.import_declaration,
+///         $.annotation_declaration,
+///         $.type_definition,
+///         $.newtype_definition,
+///         $.struct_definition,
+///         $.union_definition
+///       )
+///     ),
+///     "}"
+/// )
+/// ```
+#[derive(Debug)]
+pub struct AdlModuleBody<'a> {
+    node: Node<'a>,
+}
+
+impl<'a> AdlModuleBody<'a> {
+    pub fn try_new(node: Node<'a>) -> Option<Self> {
+        if NodeKind::is_module_body(&node) {
+            Some(AdlModuleBody { node })
+        } else {
+            None
+        }
+    }
+
+    pub fn cursor(&self) -> TreeCursor {
+        self.node.walk()
     }
 }
