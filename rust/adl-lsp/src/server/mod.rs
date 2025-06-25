@@ -81,6 +81,7 @@ impl Server {
 
         for file_path in &adl_files {
             if let Ok(uri) = Url::from_file_path(file_path) {
+                // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
                 if let Ok(contents) = std::fs::read_to_string(file_path) {
                     debug!("preprocessing ADL file: {}", uri);
                     self.ingest_document(&uri, contents);
@@ -294,6 +295,7 @@ impl Server {
 
         // If not found, try to parse the file
         if let Ok(content) = std::fs::read_to_string(uri.path()) {
+            // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
             debug!("Parsing target document for LSP operation: {}", uri);
             self.ingest_document(uri, content);
             return self.state.get_document_tree(uri);
@@ -310,6 +312,7 @@ impl Server {
         }
 
         // If not found, try to parse the file
+        // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
         if let Ok(content) = std::fs::read_to_string(uri.path()) {
             debug!("Parsing target document for LSP operation: {}", uri);
             self.ingest_document(uri, content.clone());

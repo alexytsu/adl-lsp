@@ -82,6 +82,7 @@ impl AdlLanguageServerState {
                 }
 
                 // If not found, try to parse the file
+                // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
                 if let Ok(target_content) = std::fs::read_to_string(target_uri.path()) {
                     debug!(
                         "Parsing target document for import resolution: {}",
