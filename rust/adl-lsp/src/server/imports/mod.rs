@@ -173,7 +173,7 @@ impl ImportManager for ImportsCache {
         let import_nodes = source_tree
             .find_all_nodes(NodeKind::is_import_declaration)
             .into_iter()
-            .filter_map(|n| AdlImportDeclaration::try_new(n));
+            .filter_map(AdlImportDeclaration::try_new);
 
         for import_node in import_nodes {
             self.process_import_declaration(

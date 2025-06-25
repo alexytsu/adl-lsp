@@ -35,14 +35,21 @@ impl ParsedTree {
         diagnostics.extend(
             self.find_all_nodes(NodeKind::is_error)
                 .into_iter()
-                .map(|n| Diagnostic {
-                    range: Range {
-                        start: ts_to_lsp_position(&n.start_position()),
-                        end: ts_to_lsp_position(&n.end_position()),
-                    },
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    message: "syntax error".to_string(),
-                    ..Default::default()
+                .map(|n| {
+                    let message = match n.parent() {
+                        Some(parent) => format!("syntax error in {}", parent.kind()),
+                        None => "syntax error".to_string(),
+                    };
+
+                    Diagnostic {
+                        range: Range {
+                            start: ts_to_lsp_position(&n.start_position()),
+                            end: ts_to_lsp_position(&n.end_position()),
+                        },
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        message,
+                        ..Default::default()
+                    }
                 }),
         );
     }
@@ -123,7 +130,7 @@ mod test {
         let url: Url = "file://foo/error.adl".parse().unwrap();
         let contents = include_str!("input/error.adl");
 
-        let parsed = AdlParser::new().parse(url.clone(), &contents);
+        let parsed = AdlParser::new().parse(url.clone(), contents);
         assert!(parsed.is_some());
         assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics(contents));
     }
@@ -133,8 +140,8 @@ mod test {
         let url: Url = "file://foo/importerror.adl".parse().unwrap();
         let contents = include_str!("input/importerror.adl");
 
-        let parsed = AdlParser::new().parse(url.clone(), &contents);
+        let parsed = AdlParser::new().parse(url.clone(), contents);
         assert!(parsed.is_some());
-        assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics(&contents));
+        assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics(contents));
     }
 }
