@@ -18,6 +18,7 @@ use lsp_types::{
     WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
     WorkspaceServerCapabilities,
 };
+use lsp_types::{notification, request};
 use tracing::{debug, error, trace};
 
 use crate::node::NodeKind;
@@ -35,6 +36,8 @@ mod imports;
 mod modules;
 mod state;
 
+pub struct TickEvent;
+
 #[derive(Clone)]
 pub struct Server {
     client: ClientSocket,
@@ -46,7 +49,62 @@ pub struct Server {
 
 impl From<Server> for Router<Server> {
     fn from(server: Server) -> Self {
-        Router::new(server)
+        let mut router = Router::new(server);
+
+        router
+            .request::<request::Initialize, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_initialize(params).await }
+            })
+            .request::<request::Shutdown, _>(|st, _| {
+                let st = st.clone();
+                async move { st.handle_shutdown().await }
+            })
+            .request::<request::HoverRequest, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_hover_request(params).await }
+            })
+            .request::<request::GotoDefinition, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_goto_definition(params) }
+            })
+            .request::<request::References, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_find_references(params) }
+            })
+            .request::<request::DocumentDiagnosticRequest, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_document_diagnostic_request(params) }
+            })
+            .request::<request::DocumentSymbolRequest, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_document_symbol_request(params) }
+            })
+            .notification::<notification::DidOpenTextDocument>(|st, params| {
+                trace!("did open text document: {:?}", params);
+                st.handle_did_open_text_document(params)
+            })
+            .notification::<notification::DidCloseTextDocument>(|st, params| {
+                trace!("did close text document: {:?}", params);
+                st.handle_did_close_text_document(params)
+            })
+            .notification::<notification::DidChangeTextDocument>(|st, params| {
+                trace!("did change text document: {:?}", params);
+                st.handle_did_change_text_document(params)
+            })
+            .notification::<notification::DidSaveTextDocument>(|st, params| {
+                trace!("did save text document: {:?}", params);
+                st.handle_did_save_text_document(params)
+            })
+            .notification::<notification::Exit>(|st, _| st.handle_exit())
+            .notification::<notification::Initialized>(|_, _| ControlFlow::Continue(()))
+            .notification::<notification::DidChangeConfiguration>(|st, params| {
+                trace!("did change configuration: {:?}", params);
+                st.handle_did_change_configuration(params)
+            })
+            .event::<TickEvent>(|st, _| st.handle_tick_event());
+
+        router
     }
 }
 
