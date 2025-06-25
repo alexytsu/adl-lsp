@@ -51,7 +51,7 @@ impl AdlLanguageServerState {
         uri: &Url,
         contents: String,
     ) {
-        debug!("Ingesting document: {uri:?}");
+        debug!("ingesting document: {uri:?}");
 
         // Parse the document first
         let parsed_tree = parser.parse(uri.clone(), contents.clone());
@@ -65,7 +65,7 @@ impl AdlLanguageServerState {
 
         if let Some(tree) = parsed_tree {
             // Collect diagnostics from the tree
-            debug!("Collecting diagnostics on parse tree for {}", uri.path());
+            debug!("collecting diagnostics on parse tree for {}", uri.path());
             let diagnostics = tree.collect_diagnostics(&contents);
             trees.insert(uri.clone(), tree.clone());
 
@@ -84,7 +84,7 @@ impl AdlLanguageServerState {
                 // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
                 if let Ok(target_content) = std::fs::read_to_string(target_uri.path()) {
                     debug!(
-                        "Parsing target document for import resolution: {}",
+                        "parsing target document for import resolution: {}",
                         target_uri
                     );
                     if let Some(parsed_tree) =

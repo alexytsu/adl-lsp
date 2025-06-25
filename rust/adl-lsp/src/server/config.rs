@@ -5,6 +5,7 @@ use crate::cli::{Cli, LspClient};
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     _lsp_client: Option<LspClient>,
+    // TODO: instead of explicitly passing package roots, use the closest adl-package.json file in the line of parent directories
     pub package_roots: Vec<PathBuf>,
 }
 
