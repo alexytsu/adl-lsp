@@ -1,5 +1,6 @@
 mod kind;
 pub use kind::NodeKind;
+use tracing::warn;
 use tree_sitter::Node;
 
 /// Type-safe helpers to perform operations on known-node types
@@ -31,6 +32,7 @@ impl<'a> AdlModuleDefinition<'a> {
         if NodeKind::is_module_definition(&node) {
             Some(AdlModuleDefinition { node })
         } else {
+            warn!("expected a module definition node but got {}", node.kind());
             None
         }
     }
