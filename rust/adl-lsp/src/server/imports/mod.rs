@@ -155,24 +155,27 @@ impl ImportManager for ImportsCache {
     ) {
         trace!("resolving imports for document: {}", source_uri);
 
+        // Check that this document defines a module
+        let module_definition = if let Some(module_definition) = source_tree.get_module_definition()
+        {
+            module_definition
+        } else {
+            return;
+        };
+
         // Clear existing imports for this source
         self.clear_source_caches(source_uri);
 
         // Register all type definitions in this document
         self.register_document_definitions(source_uri, source_tree, source_content);
 
-        // Find all import declarations in the document
-        let import_nodes = source_tree.find_all_nodes(NodeKind::is_import_declaration);
-
-        let module_definition = source_tree
-            .find_first_node(NodeKind::is_module_definition)
-            .expect("expected module definition");
-        let module_definition =
-            AdlModuleDefinition::try_new(module_definition).expect("expected module definition");
+        // Find all import declarations in the document and process them
+        let import_nodes = source_tree
+            .find_all_nodes(NodeKind::is_import_declaration)
+            .into_iter()
+            .filter_map(|n| AdlImportDeclaration::try_new(n));
 
         for import_node in import_nodes {
-            let import_node =
-                AdlImportDeclaration::try_new(import_node).expect("expected import_declaration");
             self.process_import_declaration(
                 package_roots,
                 source_uri,
@@ -199,7 +202,12 @@ impl ImportsCache {
         }
     }
 
-    /// Process a single import declaration node
+    /// Process a single import declaration node which is found in a given source document
+    /// `source_uri` is the URI of the source document containing the import declaration
+    /// `source_module` is the module name of the source document e.g. `common.http`
+    /// `source_content` is the text content of the source document
+    /// `import_node` is the import declaration node to process
+    /// `get_or_parse_document_tree` is a function that returns a parsed tree for a given document URI
     fn process_import_declaration(
         &self,
         package_roots: &[std::path::PathBuf],
@@ -277,13 +285,16 @@ impl ImportsCache {
 
     /// Find all type definition names in a parsed tree
     fn find_type_definitions(&self, tree: &ParsedTree, content: &[u8]) -> Vec<Fqn> {
-        let mut type_names = Vec::new();
+        let module_definition_node = tree.find_first_node(NodeKind::is_module_definition);
 
-        let module_definition = tree
-            .find_first_node(NodeKind::is_module_definition)
-            .expect("expected module definition");
-        let module_definition =
-            AdlModuleDefinition::try_new(module_definition).expect("expected module definition");
+        let module_definition = if let Some(module_definition_node) = module_definition_node {
+            AdlModuleDefinition::try_new(module_definition_node)
+                .expect("expected module definition")
+        } else {
+            return vec![];
+        };
+
+        let mut type_definitions = Vec::new();
         let module_name = module_definition.module_name(content);
 
         // Find all types defined locally in this module
@@ -297,13 +308,14 @@ impl ImportsCache {
                 .find(|child| NodeKind::is_type_name(child))
             {
                 if let Ok(type_name) = type_name_node.utf8_text(content) {
-                    type_names.push(Fqn::from_module_name_and_type_name(module_name, type_name));
+                    type_definitions
+                        .push(Fqn::from_module_name_and_type_name(module_name, type_name));
                 }
             }
         }
 
-        debug!("found type definitions: {:?}", type_names);
-        type_names
+        debug!("found type definitions: {:?}", type_definitions);
+        type_definitions
     }
 
     /// Resolve a fully-qualified import

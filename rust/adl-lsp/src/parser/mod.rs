@@ -49,6 +49,11 @@ impl Default for AdlParser {
 }
 
 impl ParsedTree {
+    pub fn get_module_definition(&self) -> Option<AdlModuleDefinition> {
+        self.find_first_node(NodeKind::is_module_definition)
+            .and_then(|node| AdlModuleDefinition::try_new(node))
+    }
+
     pub fn get_module_name<'c>(&self, content: &'c [u8]) -> Option<&'c str> {
         let module_body_node = self.find_first_node(NodeKind::is_module_definition)?;
         let module_body_node = AdlModuleDefinition::try_new(module_body_node)?;

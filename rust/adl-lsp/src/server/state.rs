@@ -65,9 +65,8 @@ impl AdlLanguageServerState {
 
         if let Some(tree) = parsed_tree {
             // Collect diagnostics from the tree
-            let mut diagnostics = vec![];
             debug!("Collecting diagnostics on parse tree for {}", uri.path());
-            diagnostics.extend(tree.collect_diagnostics());
+            let diagnostics = tree.collect_diagnostics(&contents);
             trees.insert(uri.clone(), tree.clone());
 
             // Cache document symbols

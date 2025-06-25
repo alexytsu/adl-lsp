@@ -83,7 +83,9 @@ impl Tree for ParsedTree {
     }
 
     fn find_first_node(&self, f: fn(&Node) -> bool) -> Option<Node<'_>> {
-        self.find_node_from(self.tree.root_node(), f).first().copied()
+        self.find_node_from(self.tree.root_node(), f)
+            .first()
+            .copied()
     }
 
     fn find_node_from<'a>(&self, n: Node<'a>, f: fn(&Node) -> bool) -> Vec<Node<'a>> {

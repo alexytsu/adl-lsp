@@ -527,14 +527,14 @@ impl Server {
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult, ResponseError> {
         let uri = params.text_document.uri;
-        let Some(tree) = self.get_or_parse_document(&uri) else {
+        let Some((tree, content)) = self.get_or_parse_document_with_content(&uri) else {
             return Err(ResponseError::new(
                 ErrorCode::INVALID_REQUEST,
                 "document not found",
             ));
         };
 
-        let diagnostics = tree.collect_diagnostics();
+        let diagnostics = tree.collect_diagnostics(&content);
 
         Ok(DocumentDiagnosticReportResult::Report(
             DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
