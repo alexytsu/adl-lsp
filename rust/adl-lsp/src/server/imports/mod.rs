@@ -258,6 +258,7 @@ impl ImportsCache {
 
         if let Some(ref target_uri) = imported_module {
             // Try to read the target module
+            // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
             if let Ok(target_content) = std::fs::read_to_string(target_uri.path()) {
                 // Get or parse the target tree
                 if let Some(target_tree) = get_or_parse_document_tree(target_uri) {
