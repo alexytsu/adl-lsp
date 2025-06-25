@@ -8,15 +8,26 @@ use crate::parser::ts_lsp_interop::ts_to_lsp_position;
 use super::ParsedTree;
 
 impl ParsedTree {
-    pub fn collect_diagnostics(&self) -> Vec<Diagnostic> {
-        // first collect parse errors
+    pub fn collect_diagnostics(&self, content: &str) -> Vec<Diagnostic> {
+        if content.trim().is_empty() {
+            return vec![Diagnostic {
+                severity: Some(DiagnosticSeverity::WARNING),
+                message: "Empty file".to_string(),
+                ..Default::default()
+            }];
+        }
+
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
+        // first collect parse errors
         self.collect_parse_diagnostics(&mut diagnostics);
         self.collect_parse_diagnostics_missing(&mut diagnostics);
+
+        // then collect custom semantic errors
         if let Some(import_diagnostics) = self.collect_import_diagnostics() {
             diagnostics.extend(import_diagnostics);
         }
-        debug!("collect_diagnostics: {:?}", diagnostics);
+
+        debug!("collected diagnostics: {:?}", diagnostics);
         diagnostics
     }
 
@@ -30,7 +41,6 @@ impl ParsedTree {
                         end: ts_to_lsp_position(&n.end_position()),
                     },
                     severity: Some(DiagnosticSeverity::ERROR),
-                    source: Some("adl-vscode".to_string()), // TODO: maybe make this set at CLI?
                     message: "Syntax error".to_string(),
                     ..Default::default()
                 }),
@@ -47,29 +57,25 @@ impl ParsedTree {
                         end: ts_to_lsp_position(&n.end_position()),
                     },
                     severity: Some(DiagnosticSeverity::ERROR),
-                    source: Some("adl-vscode".to_string()), // TODO: maybe make this set at CLI?
                     message: "Missing token '".to_string() + n.kind() + "'",
-                    code: None,
-                    // code: Some(NumberOrString::String(n.kind().to_string())),
-                    code_description: None,
-                    data: None,
-                    related_information: None,
-                    tags: None,
+                    ..Default::default()
                 }),
         );
     }
 
     pub fn collect_import_diagnostics(&self) -> Option<Vec<Diagnostic>> {
         let imports = self.find_all_nodes(NodeKind::is_import_declaration);
-        let module_body_children = self
-            .find_first_node(NodeKind::is_module_body)?;
+        let module_body_children = self.find_first_node(NodeKind::is_module_body)?;
         let mut cursor = module_body_children.walk();
         cursor.goto_first_child(); // opening module brace
 
         let mut first_non_import = None;
         while cursor.goto_next_sibling() {
             let node = cursor.node();
-            if !NodeKind::is_import_declaration(&node) && !NodeKind::is_docstring(&node) && !NodeKind::is_comment(&node) {
+            if !NodeKind::is_import_declaration(&node)
+                && !NodeKind::is_docstring(&node)
+                && !NodeKind::is_comment(&node)
+            {
                 first_non_import = Some(node);
                 break;
             }
@@ -123,9 +129,9 @@ mod test {
         let url: Url = "file://foo/error.adl".parse().unwrap();
         let contents = include_str!("input/error.adl");
 
-        let parsed = AdlParser::new().parse(url.clone(), contents);
+        let parsed = AdlParser::new().parse(url.clone(), &contents);
         assert!(parsed.is_some());
-        assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics());
+        assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics(contents));
     }
 
     #[test]
@@ -133,8 +139,8 @@ mod test {
         let url: Url = "file://foo/importerror.adl".parse().unwrap();
         let contents = include_str!("input/importerror.adl");
 
-        let parsed = AdlParser::new().parse(url.clone(), contents);
+        let parsed = AdlParser::new().parse(url.clone(), &contents);
         assert!(parsed.is_some());
-        assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics());
+        assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics(&contents));
     }
 }
