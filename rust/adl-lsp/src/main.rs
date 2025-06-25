@@ -75,6 +75,10 @@ async fn main() {
                 trace!("did open text document: {:?}", params);
                 st.handle_did_open_text_document(params)
             })
+            .notification::<notification::DidCloseTextDocument>(|st, params| {
+                trace!("did close text document: {:?}", params);
+                st.handle_did_close_text_document(params)
+            })
             .notification::<notification::DidChangeTextDocument>(|st, params| {
                 trace!("did change text document: {:?}", params);
                 st.handle_did_change_text_document(params)
@@ -83,12 +87,7 @@ async fn main() {
                 trace!("did save text document: {:?}", params);
                 st.handle_did_save_text_document(params)
             })
-            .notification::<notification::DidCloseTextDocument>(|st, params| {
-                trace!("did close text document: {:?}", params);
-                st.handle_did_close_text_document(params)
-            })
             .notification::<notification::Exit>(|st, _| st.handle_exit())
-            // TODO: handle these notifications
             .notification::<notification::Initialized>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::DidChangeConfiguration>(|st, params| {
                 trace!("did change configuration: {:?}", params);
