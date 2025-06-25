@@ -13,12 +13,12 @@ use lsp_types::{
     FileOperationRegistrationOptions, FullDocumentDiagnosticReport, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, Location, OneOf, ReferenceParams,
-    RelatedFullDocumentDiagnosticReport, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Url, WorkDoneProgressOptions,
-    WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
+    RelatedFullDocumentDiagnosticReport, SaveOptions, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
+    WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
+    WorkspaceServerCapabilities,
 };
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use crate::node::NodeKind;
 use crate::parser::definition::{Definition, DefinitionLocation};
@@ -157,6 +157,7 @@ impl Server {
         std::process::exit(0);
     }
 
+    /// Handle the `initialize` notification and respond with the server's capabilities.
     pub async fn handle_initialize(
         &mut self,
         _params: InitializeParams,
@@ -194,15 +195,18 @@ impl Server {
         };
 
         let result = InitializeResult {
-            // TODO: fine-tune these capabilities
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
+                        // Get notified on open and close of files (client has taken ownership)
                         open_close: Some(true),
-                        change: Some(TextDocumentSyncKind::FULL),
-                        save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+                        // Request full changes on save
+                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                            include_text: Some(true),
+                        })),
                         will_save: None,
-                        will_save_wait_until: None,
+                        will_save_wait_until: None, // NOTE: could be used to run autoformatting here, returning a list of edits
+                        change: None, // Not responding per change until a more permissive grammar is integrated
                     },
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -210,12 +214,12 @@ impl Server {
                 references_provider: Some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
                     DiagnosticOptions {
-                        inter_file_dependencies: false,
-                        workspace_diagnostics: false, // TODO: do file-structure diagnostics
-                        identifier: None,
+                        inter_file_dependencies: true,
+                        identifier: Some(String::from("adl-lsp")),
                         work_done_progress_options: WorkDoneProgressOptions {
-                            work_done_progress: Some(false),
+                            work_done_progress: None,
                         },
+                        workspace_diagnostics: false, // TODO: check that modules are defined in the correctly structured files
                     },
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
@@ -586,12 +590,19 @@ impl Server {
         &mut self,
         params: DidChangeTextDocumentParams,
     ) -> ControlFlow<Result<(), Error>> {
+        error!("unexpected textDocument/didChange event");
+
         let uri = params.text_document.uri;
         let contents = params.content_changes.first();
+
+        trace!("textDocument/didChange event for {}", uri.path());
+
         if let Some(change) = contents {
             let contents = change.text.clone();
+            trace!("textDocument/didChange content is {:?}", change);
             self.ingest_document(&uri, contents);
         }
+
         ControlFlow::Continue(())
     }
 
