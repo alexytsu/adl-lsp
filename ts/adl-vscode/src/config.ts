@@ -6,7 +6,7 @@ import { Executable } from "vscode-languageclient/node";
 export function getPackageRoots(): string[] {
   const adlPackageRootsConfig = v.workspace
     .getConfiguration("adl")
-    .get("packageRoots");
+    .get("searchDirs");
 
   let _adlPackageRoots: string[];
   if (adlPackageRootsConfig instanceof Array) {

@@ -34,7 +34,7 @@ This extension contributes the following settings:
 
 - `adl.lspPath`: If you ran `cargo install adl-lsp` set this to
   "~/.cargo/bin/adl-lsp"
-- `adl.packageRoots`: ADL package locations. An ADL package is the directory
+- `adl.searchDirs`: ADL package locations. An ADL package is the directory
   that contains top-level ADL modules.
 
 ## Publishing checklist

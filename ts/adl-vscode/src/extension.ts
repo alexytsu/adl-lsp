@@ -39,10 +39,10 @@ export async function activate(context: v.ExtensionContext) {
 
   v.workspace.onDidChangeConfiguration(async (e) => {
     console.log("Configuration changed: ", e);
-    if (e.affectsConfiguration("adl.packageRoots")) {
+    if (e.affectsConfiguration("adl.searchDirs")) {
       client.sendNotification(DidChangeConfigurationNotification.type, {
         settings: {
-          packageRoots: getPackageRoots(),
+          searchDirs: getPackageRoots(),
         },
       });
     }

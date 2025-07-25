@@ -695,8 +695,8 @@ impl Server {
     ) -> ControlFlow<Result<(), Error>> {
         let package_roots: Result<Vec<PathBuf>, ResponseError> = params
             .settings
-            .get("packageRoots")
-            .ok_or_else(|| ResponseError::new(ErrorCode::INTERNAL_ERROR, "packageRoots not found"))
+            .get("searchDirs")
+            .ok_or_else(|| ResponseError::new(ErrorCode::INTERNAL_ERROR, "searchDirs not found"))
             .map(|v| {
                 v.as_array()
                     .unwrap()
