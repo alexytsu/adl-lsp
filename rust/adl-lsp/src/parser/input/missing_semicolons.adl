@@ -1,0 +1,20 @@
+module test {
+    import foo.bar.Baz
+    import foo.char.*
+    
+    type MyType = String
+    
+    newtype MyNewtype = String = "default"
+    
+    struct MyStruct {
+        String name
+        Int32 age
+    }
+    
+    union MyUnion {
+        String name
+        Int32 age
+    }
+    
+    annotation MyAnnotation::field String = "value"
+} 
