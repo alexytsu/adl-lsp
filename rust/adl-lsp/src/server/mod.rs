@@ -1,5 +1,6 @@
+use std::collections::HashSet;
 use std::ops::ControlFlow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use async_lsp::router::Router;
@@ -19,7 +20,7 @@ use lsp_types::{
     WorkspaceServerCapabilities,
 };
 use lsp_types::{notification, request};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::node::NodeKind;
 use crate::parser::definition::{Definition, DefinitionLocation};
@@ -29,6 +30,7 @@ use crate::parser::symbols::DocumentSymbols;
 use crate::parser::{AdlParser, ParsedTree};
 use crate::server::config::ServerConfig;
 use crate::server::imports::Fqn;
+use crate::server::modules::AdlPackageDefinition;
 use crate::server::state::AdlLanguageServerState;
 
 pub mod config;
@@ -46,6 +48,8 @@ pub struct Server {
     state: AdlLanguageServerState,
     parser: Arc<Mutex<AdlParser>>,
 }
+
+const ADL_EXTENSIONS: [&str; 6] = ["adl", "java", "rs", "ts", "hs", "cpp"];
 
 impl From<Server> for Router<Server> {
     fn from(server: Server) -> Self {
@@ -124,7 +128,7 @@ impl Server {
         self.state.ingest_document(
             &mut self.client,
             &mut parser,
-            &self.config.package_roots,
+            &self.config.search_dirs,
             uri,
             contents,
         );
@@ -155,11 +159,53 @@ impl Server {
         debug!("files processed: {}", &adl_files.len());
     }
 
-    /// Discover all .adl files in the configured package roots
+    // TODO(alex): have this accept a AsRef<Path> instead of a &Path?
+    fn package_root_from_path(path: &Path) -> Option<PathBuf> {
+        if !path.exists() {
+            None
+        } else if path.is_dir() && path.join("adl-package.json").exists() {
+            Some(path.to_path_buf())
+        } else {
+            path.parent().and_then(Self::package_root_from_path)
+        }
+    }
+
+    /// Discover all .adl files in the search dirs and any dependencies specified in adl-package.json
     fn discover_adl_files(&self) -> Vec<PathBuf> {
         let mut adl_files = Vec::new();
 
-        for package_root in &self.config.package_roots {
+        // Find the package roots from any search dirs
+        let mut package_roots = HashSet::<PathBuf>::new();
+        self.config.search_dirs.iter().for_each(|dir| {
+            if let Some(root) = Self::package_root_from_path(dir.as_path()) {
+                // resolve dependencies
+                let package_definition_file = root.join("adl-package.json");
+                if package_definition_file.exists() {
+                    let package_json = std::fs::read_to_string(&package_definition_file).unwrap();
+                    let package_definition: AdlPackageDefinition = serde_json::from_str(&package_json).unwrap();
+                    info!("found package definition at {}: {:?}", &package_definition_file.display(), package_definition);
+                    let depdency_roots = package_definition.dependencies.iter().map(|dep| {
+                        // TODO(alex): better detection of relative v.s. absolute paths
+                        let dep_root = root.join(&dep.localdir);
+                        if dep_root.exists() {
+                            dep_root
+                        } else {
+                            // treat as absolute path?
+                            root.join(&dep.localdir)
+                        }
+                    });
+                    // TODO(alex): this part needs to recursively discover dependencies in new roots
+                    package_roots.extend(depdency_roots);
+                }
+
+                package_roots.insert(root);
+            } else {
+                // If no package root is found, add the explicit search dir as a package root
+                package_roots.insert(dir.to_path_buf());
+            }
+        });
+
+        for package_root in &package_roots {
             debug!(
                 "discovering ADL files in package root: {}",
                 package_root.display()
@@ -198,7 +244,11 @@ impl Server {
                             Self::discover_adl_files_recursive(&path, adl_files);
                         }
                     }
-                } else if path.extension().and_then(|ext| ext.to_str()) == Some("adl") {
+                } else if path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext.to_lowercase().contains("adl"))
+                {
                     debug!("found ADL file: {}", path.display());
                     adl_files.push(path);
                 }
@@ -231,15 +281,7 @@ impl Server {
             },
         }];
 
-        let suffixes = vec![
-            String::from("java"),
-            String::from("rs"),
-            String::from("ts"),
-            String::from("hs"),
-            String::from("cpp"),
-        ];
-
-        for suffix in suffixes {
+        for suffix in ADL_EXTENSIONS {
             file_operation_filers.push(FileOperationFilter {
                 scheme: Some(String::from("file")),
                 pattern: FileOperationPattern {
@@ -693,7 +735,7 @@ impl Server {
         &mut self,
         params: DidChangeConfigurationParams,
     ) -> ControlFlow<Result<(), Error>> {
-        let package_roots: Result<Vec<PathBuf>, ResponseError> = params
+        let search_dirs: Result<Vec<PathBuf>, ResponseError> = params
             .settings
             .get("searchDirs")
             .ok_or_else(|| ResponseError::new(ErrorCode::INTERNAL_ERROR, "searchDirs not found"))
@@ -704,8 +746,8 @@ impl Server {
                     .map(|v| PathBuf::from(v.as_str().unwrap()))
                     .collect()
             });
-        if let Ok(package_roots) = package_roots {
-            self.config.package_roots = package_roots;
+        if let Ok(search_dirs) = search_dirs {
+            self.config.search_dirs = search_dirs;
             self.state.clear_cache();
             self.initialize_workspace();
         }

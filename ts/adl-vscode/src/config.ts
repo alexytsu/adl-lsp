@@ -3,7 +3,7 @@ import path from "path";
 import os from "os";
 import { Executable } from "vscode-languageclient/node";
 
-export function getPackageRoots(): string[] {
+export function getSearchDirs(): string[] {
   const adlPackageRootsConfig = v.workspace
     .getConfiguration("adl")
     .get("searchDirs");
@@ -55,14 +55,14 @@ export function getLspExecutable(): {
   dev: Executable;
   prod: Executable;
 } {
-  const adlPackageRoots = getPackageRoots();
+  const adlSearchDirs = getSearchDirs();
   const adlLspPath = getLspPath();
 
   const adlLspArgs = [
     "--client",
     "vscode",
-    "--package-roots",
-    adlPackageRoots.join(","),
+    "--search-dirs",
+    adlSearchDirs.join(","),
   ];
 
   return {
