@@ -174,36 +174,15 @@ impl Server {
     fn discover_adl_files(&self) -> Vec<PathBuf> {
         let mut adl_files = Vec::new();
 
-        // Find the package roots from any search dirs
-        let mut package_roots = HashSet::<PathBuf>::new();
-        self.config.search_dirs.iter().for_each(|dir| {
-            if let Some(root) = Self::package_root_from_path(dir.as_path()) {
-                // resolve dependencies
-                let package_definition_file = root.join("adl-package.json");
-                if package_definition_file.exists() {
-                    let package_json = std::fs::read_to_string(&package_definition_file).unwrap();
-                    let package_definition: AdlPackageDefinition = serde_json::from_str(&package_json).unwrap();
-                    info!("found package definition at {}: {:?}", &package_definition_file.display(), package_definition);
-                    let depdency_roots = package_definition.dependencies.iter().map(|dep| {
-                        // TODO(alex): better detection of relative v.s. absolute paths
-                        let dep_root = root.join(&dep.localdir);
-                        if dep_root.exists() {
-                            dep_root
-                        } else {
-                            // treat as absolute path?
-                            root.join(&dep.localdir)
-                        }
-                    });
-                    // TODO(alex): this part needs to recursively discover dependencies in new roots
-                    package_roots.extend(depdency_roots);
-                }
-
-                package_roots.insert(root);
-            } else {
-                // If no package root is found, add the explicit search dir as a package root
-                package_roots.insert(dir.to_path_buf());
+        // Find the package roots from any search dirs and resolve dependencies recursively
+        let package_roots = match self.resolve_package_dependencies() {
+            Ok(roots) => roots,
+            Err(e) => {
+                error!("Failed to resolve package dependencies: {}", e);
+                // Fall back to just the search dirs without dependencies
+                self.config.search_dirs.iter().cloned().collect()
             }
-        });
+        };
 
         for package_root in &package_roots {
             debug!(
@@ -223,6 +202,121 @@ impl Server {
 
         debug!("total ADL files discovered: {}", adl_files.len());
         adl_files
+    }
+
+    /// Resolve package dependencies recursively using a queue-based approach
+    /// Returns an error if circular dependencies are detected
+    fn resolve_package_dependencies(&self) -> Result<HashSet<PathBuf>, String> {
+        let mut resolved_roots = HashSet::<PathBuf>::new();
+        let mut visited_packages = HashSet::<PathBuf>::new();
+        let mut processing_queue = std::collections::VecDeque::new();
+
+        // Initialize queue with search dirs
+        for dir in &self.config.search_dirs {
+            if let Some(root) = Self::package_root_from_path(dir.as_path()) {
+                processing_queue.push_back(root);
+            } else {
+                // If no package root is found, add the explicit search dir as a package root
+                resolved_roots.insert(dir.to_path_buf());
+            }
+        }
+
+        // Process queue until all dependencies are resolved
+        while let Some(package_root) = processing_queue.pop_front() {
+            let normalized_root = self.normalize_path(&package_root);
+            
+            // Check for circular dependencies using normalized paths
+            if visited_packages.contains(&normalized_root) {
+                return Err(format!(
+                    "Circular dependency detected for package: {}",
+                    normalized_root.display()
+                ));
+            }
+
+            visited_packages.insert(normalized_root.clone());
+
+            // Check if this package has dependencies
+            let package_definition_file = package_root.join("adl-package.json");
+            if package_definition_file.exists() {
+                match std::fs::read_to_string(&package_definition_file) {
+                    Ok(package_json) => {
+                        match serde_json::from_str::<AdlPackageDefinition>(&package_json) {
+                            Ok(package_definition) => {
+                                info!(
+                                    "found package definition at {}: {:?}",
+                                    package_definition_file.display(),
+                                    package_definition
+                                );
+
+                                // Process each dependency
+                                for dep in &package_definition.dependencies {
+                                    let dep_root = self.resolve_dependency_path(&package_root, &dep.localdir);
+                                    let normalized_dep_root = self.normalize_path(&dep_root);
+                                    
+                                    if dep_root.exists() {
+                                        // Check for circular dependency first
+                                        if visited_packages.contains(&normalized_dep_root) {
+                                            return Err(format!(
+                                                "Circular dependency detected: {} -> {}",
+                                                normalized_root.display(),
+                                                normalized_dep_root.display()
+                                            ));
+                                        }
+                                        
+                                        // Add to queue for processing if not already resolved
+                                        if !resolved_roots.contains(&normalized_dep_root) {
+                                            processing_queue.push_back(dep_root.clone());
+                                        }
+                                        resolved_roots.insert(normalized_dep_root);
+                                    } else {
+                                        warn!(
+                                            "Dependency path does not exist: {} (from package {})",
+                                            dep_root.display(),
+                                            package_root.display()
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to parse package definition at {}: {}",
+                                    package_definition_file.display(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to read package definition at {}: {}",
+                            package_definition_file.display(),
+                            e
+                        );
+                    }
+                }
+            }
+
+            // Add the current package root to resolved roots
+            resolved_roots.insert(normalized_root);
+        }
+
+        Ok(resolved_roots)
+    }
+
+    /// Resolve a dependency path, handling both relative and absolute paths
+    fn resolve_dependency_path(&self, package_root: &PathBuf, localdir: &str) -> PathBuf {
+        // Check if it's an absolute path
+        if localdir.starts_with('/') {
+            PathBuf::from(localdir)
+        } else {
+            // Treat as relative path from package root
+            package_root.join(localdir)
+        }
+    }
+
+    /// Normalize a path by resolving all relative components
+    fn normalize_path(&self, path: &PathBuf) -> PathBuf {
+        path.canonicalize().unwrap_or_else(|_| path.clone())
     }
 
     /// Recursively discover .adl files in a directory
@@ -760,5 +854,152 @@ impl Server {
     pub fn handle_tick_event(&mut self) -> ControlFlow<Result<(), Error>> {
         self.counter += 1;
         ControlFlow::Continue(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_circular_dependency_detection() {
+        // Create temporary directories for testing
+        let temp_dir = TempDir::new().unwrap();
+        let package_a = temp_dir.path().join("package_a");
+        let package_b = temp_dir.path().join("package_b");
+        
+        fs::create_dir_all(&package_a).unwrap();
+        fs::create_dir_all(&package_b).unwrap();
+
+        // Create package A that depends on package B
+        let package_a_json = r#"{
+            "name": "package_a",
+            "dependencies": [
+                {"localdir": "../package_b"}
+            ]
+        }"#;
+        fs::write(package_a.join("adl-package.json"), package_a_json).unwrap();
+
+        // Create package B that depends on package A (circular dependency)
+        let package_b_json = r#"{
+            "name": "package_b",
+            "dependencies": [
+                {"localdir": "../package_a"}
+            ]
+        }"#;
+        fs::write(package_b.join("adl-package.json"), package_b_json).unwrap();
+
+        // Create a server with package_a as search dir
+        let config = ServerConfig::new(None, vec![package_a.to_string_lossy().to_string()]);
+        let client = ClientSocket::new_closed();
+        let server = Server::new(&client, config);
+
+        // Test that circular dependency is detected
+        let result = server.resolve_package_dependencies();
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("Circular dependency detected"));
+    }
+
+    #[test]
+    fn test_valid_dependency_resolution() {
+        // Create temporary directories for testing
+        let temp_dir = TempDir::new().unwrap();
+        let package_a = temp_dir.path().join("package_a");
+        let package_b = temp_dir.path().join("package_b");
+        let package_c = temp_dir.path().join("package_c");
+        
+        fs::create_dir_all(&package_a).unwrap();
+        fs::create_dir_all(&package_b).unwrap();
+        fs::create_dir_all(&package_c).unwrap();
+
+        // Create package A that depends on package B
+        let package_a_json = r#"{
+            "name": "package_a",
+            "dependencies": [
+                {"localdir": "../package_b"}
+            ]
+        }"#;
+        fs::write(package_a.join("adl-package.json"), package_a_json).unwrap();
+
+        // Create package B that depends on package C
+        let package_b_json = r#"{
+            "name": "package_b",
+            "dependencies": [
+                {"localdir": "../package_c"}
+            ]
+        }"#;
+        fs::write(package_b.join("adl-package.json"), package_b_json).unwrap();
+
+        // Create package C with no dependencies
+        let package_c_json = r#"{
+            "name": "package_c",
+            "dependencies": []
+        }"#;
+        fs::write(package_c.join("adl-package.json"), package_c_json).unwrap();
+
+        // Create a server with package_a as search dir
+        let config = ServerConfig::new(None, vec![package_a.to_string_lossy().to_string()]);
+        let client = ClientSocket::new_closed();
+        let server = Server::new(&client, config);
+
+        // Test that dependencies are resolved correctly
+        let result = server.resolve_package_dependencies();
+        assert!(result.is_ok());
+        let resolved_roots = result.unwrap();
+        
+        // Should contain all three packages (using normalized paths for comparison)
+        let normalized_package_a = server.normalize_path(&package_a);
+        let normalized_package_b = server.normalize_path(&package_b);
+        let normalized_package_c = server.normalize_path(&package_c);
+        
+        assert!(resolved_roots.contains(&normalized_package_a));
+        assert!(resolved_roots.contains(&normalized_package_b));
+        assert!(resolved_roots.contains(&normalized_package_c));
+        assert_eq!(resolved_roots.len(), 3);
+    }
+
+    #[test]
+    fn test_absolute_path_dependency() {
+        let temp_dir = TempDir::new().unwrap();
+        let package_a = temp_dir.path().join("package_a");
+        let package_b = temp_dir.path().join("package_b");
+        
+        fs::create_dir_all(&package_a).unwrap();
+        fs::create_dir_all(&package_b).unwrap();
+
+        // Create package A that depends on package B using absolute path
+        let package_a_json = format!(r#"{{
+            "name": "package_a",
+            "dependencies": [
+                {{"localdir": "{}"}}
+            ]
+        }}"#, package_b.to_string_lossy());
+        fs::write(package_a.join("adl-package.json"), package_a_json).unwrap();
+
+        // Create package B with no dependencies
+        let package_b_json = r#"{
+            "name": "package_b",
+            "dependencies": []
+        }"#;
+        fs::write(package_b.join("adl-package.json"), package_b_json).unwrap();
+
+        let config = ServerConfig::new(None, vec![package_a.to_string_lossy().to_string()]);
+        let client = ClientSocket::new_closed();
+        let server = Server::new(&client, config);
+
+        let result = server.resolve_package_dependencies();
+        assert!(result.is_ok());
+        let resolved_roots = result.unwrap();
+        
+        // Should contain both packages (using normalized paths for comparison)
+        let normalized_package_a = server.normalize_path(&package_a);
+        let normalized_package_b = server.normalize_path(&package_b);
+        
+        assert!(resolved_roots.contains(&normalized_package_a));
+        assert!(resolved_roots.contains(&normalized_package_b));
+        assert_eq!(resolved_roots.len(), 2);
     }
 }
