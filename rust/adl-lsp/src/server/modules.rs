@@ -1,9 +1,37 @@
 use async_lsp::lsp_types::Url;
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tracing::trace;
 
+#[derive(Debug, Deserialize)]
+pub struct AdlPackageRef {
+    pub localdir: String,
+}
+
+/// ADL package definition JSON schema
+/// NOTE(alex): this will need to be updated if AdlPackageRef is extended
+/// ```adl
+///module adlc.package {
+///struct AdlPackage {
+///    String name;
+///    Vector<AdlPackageRef> dependencies = [];
+///};
+///
+///union AdlPackageRef {
+///    String localdir;
+///};
+///};
+/// ```
+///
+#[derive(Debug, Deserialize)]
+pub struct AdlPackageDefinition {
+    pub name: String,
+    pub dependencies: Vec<AdlPackageRef>,
+}
+
+
 pub fn resolve_import(
-    package_roots: &[PathBuf],
+    search_dirs: &[PathBuf],
     source_uri: &Url,
     source_module: &str,
     imported_module_path: &Vec<&str>,
@@ -33,7 +61,7 @@ pub fn resolve_import(
     }
 
     // Check if the source package is in other package roots
-    for root in package_roots {
+    for root in search_dirs {
         let target_path = root.join(format!("{}.adl", imported_module_path.join("/")));
         if let Some(ref source_package_target_path) = source_package_target_path {
             if &target_path == source_package_target_path {
@@ -54,11 +82,11 @@ mod tests {
 
     #[test]
     fn test_resolve_import_in_same_package_sibling() {
-        let package_roots = vec![PathBuf::from("/project/adl")];
+        let search_dirs = vec![PathBuf::from("/project/adl")];
         let source_uri = Url::parse("file:///project/adl/common/main.adl").unwrap();
 
         let resolved = resolve_import(
-            &package_roots,
+            &search_dirs,
             &source_uri,
             "common.main",
             &vec!["common", "strings"],
@@ -73,11 +101,11 @@ mod tests {
     #[test]
     fn test_resolve_import_in_same_package_sibling_implicit() {
         // no package roots, rely on implicit resolution in same package root
-        let package_roots = vec![];
+        let search_dirs = vec![];
         let source_uri = Url::parse("file:///project/adl/common/main.adl").unwrap();
 
         let resolved = resolve_import(
-            &package_roots,
+            &search_dirs,
             &source_uri,
             "common.main",
             &vec!["common", "strings"],
@@ -91,11 +119,11 @@ mod tests {
 
     #[test]
     fn test_resolve_import_in_same_package_cousin_implicit() {
-        let package_roots = vec![];
+        let search_dirs = vec![];
         let source_uri = Url::parse("file:///project/adl/common/main.adl").unwrap();
 
         let resolved = resolve_import(
-            &package_roots,
+            &search_dirs,
             &source_uri,
             "common.main",
             &vec!["app", "main"],
@@ -109,10 +137,10 @@ mod tests {
 
     #[test]
     fn test_deeply_nested_import() {
-        let package_roots = vec![PathBuf::from("/project/adl")];
+        let search_dirs = vec![PathBuf::from("/project/adl")];
         let source_uri = Url::parse("file:///project/adl/a/b/c/d/e/f/g/module.adl").unwrap();
         let resolved = resolve_import(
-            &package_roots,
+            &search_dirs,
             &source_uri,
             "a.b.c.d.e.f.g.module",
             &vec!["a", "b", "c", "d", "e", "ff", "gg", "hh", "ii", "module"],
@@ -126,11 +154,11 @@ mod tests {
 
     #[test]
     fn test_rooted_deep_in_workspace() {
-        let package_roots = vec![PathBuf::from("/project/a/b/c/d/e/f/g/adl")];
+        let search_dirs = vec![PathBuf::from("/project/a/b/c/d/e/f/g/adl")];
         let source_uri =
             Url::parse("file:///project/a/b/c/d/e/f/g/adl/a/b/c/d/e/f/g/module.adl").unwrap();
         let resolved = resolve_import(
-            &package_roots,
+            &search_dirs,
             &source_uri,
             "a.b.c.d.e.f.g.module",
             &vec!["a", "b", "c", "d", "e", "ff", "gg", "hh", "ii", "module"],
@@ -147,14 +175,14 @@ mod tests {
 
     #[test]
     fn test_resolve_from_other_package_root() {
-        let package_roots = vec![
+        let search_dirs = vec![
             PathBuf::from("/project/adl"),
             PathBuf::from("/project/adl-no-strings"),
             PathBuf::from("/project/adl-strings"),
         ];
         let source_uri = Url::parse("file:///project/adl/common/main.adl").unwrap();
         let resolved = resolve_import(
-            &package_roots,
+            &search_dirs,
             &source_uri,
             "common.main",
             &vec!["common", "strings"],

@@ -125,7 +125,7 @@ pub trait ImportManager {
     /// Resolve imports from a document and populate the imports table
     fn resolve_document_imports(
         &self,
-        package_roots: &[std::path::PathBuf],
+        search_dirs: &[std::path::PathBuf],
         source_uri: &Url,
         tree: &ParsedTree,
         content: &[u8],
@@ -147,7 +147,7 @@ impl ImportManager for ImportsCache {
     /// Resolve imports from a document and populate the imports table
     fn resolve_document_imports(
         &self,
-        package_roots: &[std::path::PathBuf],
+        search_dirs: &[std::path::PathBuf],
         source_uri: &Url,
         source_tree: &ParsedTree,
         source_content: &[u8],
@@ -177,7 +177,7 @@ impl ImportManager for ImportsCache {
 
         for import_node in import_nodes {
             self.process_import_declaration(
-                package_roots,
+                search_dirs,
                 source_uri,
                 module_definition.module_name(source_content),
                 source_content,
@@ -210,7 +210,7 @@ impl ImportsCache {
     /// `get_or_parse_document_tree` is a function that returns a parsed tree for a given document URI
     fn process_import_declaration(
         &self,
-        package_roots: &[std::path::PathBuf],
+        search_dirs: &[std::path::PathBuf],
         source_uri: &Url,
         source_module: &str,
         source_content: &[u8],
@@ -226,7 +226,7 @@ impl ImportsCache {
                         .imported_type_name(source_content)
                         .expect(" expected FullyQualified import to have a type_name "),
                 );
-                self.resolve_fully_qualified_import(package_roots, source_uri, source_module, &fqn);
+                self.resolve_fully_qualified_import(search_dirs, source_uri, source_module, &fqn);
             }
             AdlImportDeclaration::StarImport(_) => {
                 let imported_module_path =
@@ -235,7 +235,7 @@ impl ImportsCache {
                 //     &ParsedTree::get_source_module(import_node.inner(), source_content)
                 //         .unwrap_or_default();
                 self.expand_star_import(
-                    package_roots,
+                    search_dirs,
                     source_uri,
                     source_module,
                     &imported_module_path,
@@ -248,7 +248,7 @@ impl ImportsCache {
     /// Expand a star import by finding all type definitions in the target module
     fn expand_star_import(
         &self,
-        package_roots: &[std::path::PathBuf],
+        search_dirs: &[std::path::PathBuf],
         source_uri: &Url,
         source_module: &str,
         imported_module_path: &Vec<&str>,
@@ -257,7 +257,7 @@ impl ImportsCache {
         debug!("expanding star import from {:?}", imported_module_path);
 
         let imported_module = modules::resolve_import(
-            package_roots,
+            search_dirs,
             source_uri,
             source_module,
             imported_module_path,
@@ -321,7 +321,7 @@ impl ImportsCache {
     /// Resolve a fully-qualified import
     fn resolve_fully_qualified_import(
         &self,
-        package_roots: &[std::path::PathBuf],
+        search_dirs: &[std::path::PathBuf],
         source_uri: &Url,
         source_module: &str,
         import: &Fqn,
@@ -330,7 +330,7 @@ impl ImportsCache {
 
         // Resolve the module paths
         let possible_paths = modules::resolve_import(
-            package_roots,
+            search_dirs,
             source_uri,
             source_module,
             &import.module_path(),

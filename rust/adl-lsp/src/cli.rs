@@ -14,5 +14,5 @@ pub struct Cli {
     pub client: Option<LspClient>,
 
     #[clap(long, value_parser, num_args = 1.., value_delimiter = ',')]
-    pub package_roots: Vec<String>,
+    pub search_dirs: Vec<String>,
 }
