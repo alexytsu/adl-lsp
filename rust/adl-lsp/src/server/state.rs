@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::sync::{Arc, RwLock};
 
 use async_lsp::{ClientSocket, LanguageClient};
@@ -16,10 +16,6 @@ pub struct AdlLanguageServerState {
     documents: Arc<RwLock<HashMap<Url, String>>>,
     trees: Arc<RwLock<HashMap<Url, ParsedTree>>>,
     symbols: Arc<RwLock<HashMap<Url, Vec<DocumentSymbol>>>>,
-    /// Map of directory URIs to the set of modules in that directory
-    dir_modules: Arc<RwLock<HashMap<Url, HashSet<Url>>>>,
-    /// Map of module URIs to the directory they belong to
-    module_dirs: Arc<RwLock<HashMap<Url, Url>>>,
     import_manager: ImportsCache,
 }
 

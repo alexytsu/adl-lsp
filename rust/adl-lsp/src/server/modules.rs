@@ -25,6 +25,7 @@ pub struct AdlPackageRef {
 ///
 #[derive(Debug, Deserialize)]
 pub struct AdlPackageDefinition {
+    #[allow(dead_code)]
     pub name: String,
     pub dependencies: Vec<AdlPackageRef>,
 }
