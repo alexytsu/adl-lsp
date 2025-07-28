@@ -25,3 +25,4 @@ tree-sitter-adl = { version = "0.5.0", path = "../../../tree-sitter-adl" }
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["yaml"] }
+tempfile = "3.8"
