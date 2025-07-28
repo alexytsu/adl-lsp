@@ -304,19 +304,19 @@ impl Server {
     }
 
     /// Resolve a dependency path, handling both relative and absolute paths
-    fn resolve_dependency_path(&self, package_root: &PathBuf, localdir: &str) -> PathBuf {
+    fn resolve_dependency_path<T: AsRef<Path>>(&self, package_root: T, localdir: &str) -> PathBuf {
         // Check if it's an absolute path
         if localdir.starts_with('/') {
             PathBuf::from(localdir)
         } else {
             // Treat as relative path from package root
-            package_root.join(localdir)
+            package_root.as_ref().join(localdir)
         }
     }
 
     /// Normalize a path by resolving all relative components
-    fn normalize_path(&self, path: &PathBuf) -> PathBuf {
-        path.canonicalize().unwrap_or_else(|_| path.clone())
+    fn normalize_path<T: AsRef<Path>>(&self, path: T) -> PathBuf {
+        path.as_ref().canonicalize().unwrap_or_else(|_| path.as_ref().to_path_buf())
     }
 
     /// Recursively discover .adl files in a directory
