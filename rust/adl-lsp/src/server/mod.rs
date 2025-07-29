@@ -74,9 +74,37 @@ impl Server {
 
     /// Initialize the server by discovering and processing all ADL files in package roots
     pub fn initialize_workspace(&mut self) {
-        debug!("initializing workspace by discovering ADL files in package roots");
+        debug!("initializing workspace with automatic package discovery");
 
-        let adl_files = self.discover_adl_files();
+        // Use automatic discovery if no explicit package roots are configured
+        let effective_package_roots = if self.config.package_roots.is_empty() {
+            debug!("No explicit package roots configured, using automatic discovery");
+            modules::discover_all_package_roots(&[])
+        } else {
+            debug!("Using configured package roots with automatic discovery enhancement");
+            // Start with configured roots and auto-discover from them
+            let mut discovered = modules::discover_all_package_roots(&self.config.package_roots);
+            // Add originally configured roots to ensure they're included
+            for root in &self.config.package_roots {
+                if !discovered.contains(root) {
+                    discovered.push(root.clone());
+                }
+            }
+            discovered
+        };
+
+        // Resolve dependencies from adl-package.json files
+        let all_package_roots = modules::resolve_package_dependencies(&effective_package_roots);
+        
+        debug!("Final package roots after discovery and dependency resolution:");
+        for root in &all_package_roots {
+            debug!("  - {}", root.display());
+        }
+
+        // Update the server config with the discovered roots
+        self.config.package_roots = all_package_roots.clone();
+
+        let adl_files = self.discover_adl_files_in_roots(&all_package_roots);
         debug!("found {} ADL files to preprocess", adl_files.len());
 
         for file_path in &adl_files {
@@ -96,11 +124,11 @@ impl Server {
         debug!("files processed: {}", &adl_files.len());
     }
 
-    /// Discover all .adl files in the configured package roots
-    fn discover_adl_files(&self) -> Vec<PathBuf> {
+    /// Discover all .adl files in the given package roots
+    fn discover_adl_files_in_roots(&self, package_roots: &[PathBuf]) -> Vec<PathBuf> {
         let mut adl_files = Vec::new();
 
-        for package_root in &self.config.package_roots {
+        for package_root in package_roots {
             debug!(
                 "discovering ADL files in package root: {}",
                 package_root.display()
@@ -118,6 +146,11 @@ impl Server {
 
         debug!("total ADL files discovered: {}", adl_files.len());
         adl_files
+    }
+
+    /// Discover all .adl files in the configured package roots (legacy method for backward compatibility)
+    fn discover_adl_files(&self) -> Vec<PathBuf> {
+        self.discover_adl_files_in_roots(&self.config.package_roots)
     }
 
     /// Recursively discover .adl files in a directory
@@ -578,6 +611,27 @@ impl Server {
     ) -> ControlFlow<Result<(), Error>> {
         let uri = params.text_document.uri;
         let contents = params.text_document.text;
+        
+        // Check if this document reveals a new package root
+        if let Some(new_package_root) = modules::discover_package_root_from_adl_file(&uri) {
+            if !self.config.package_roots.contains(&new_package_root) {
+                debug!("Document {} reveals new package root: {}", uri, new_package_root.display());
+                
+                // Add the new package root and resolve its dependencies
+                let mut updated_roots = self.config.package_roots.clone();
+                updated_roots.push(new_package_root);
+                let all_package_roots = modules::resolve_package_dependencies(&updated_roots);
+                
+                // Only reinitialize if we actually discovered new roots
+                if all_package_roots.len() > self.config.package_roots.len() {
+                    debug!("Reinitializing workspace with newly discovered package roots");
+                    self.config.package_roots = all_package_roots;
+                    self.state.clear_cache();
+                    self.initialize_workspace();
+                }
+            }
+        }
+        
         self.ingest_document(&uri, contents);
         ControlFlow::Continue(())
     }
@@ -629,7 +683,33 @@ impl Server {
                     .collect()
             });
         if let Ok(package_roots) = package_roots {
-            self.config.package_roots = package_roots;
+            debug!("Configuration changed, updating package roots with automatic discovery");
+            
+            // Use the new automatic discovery and dependency resolution
+            let effective_package_roots = if package_roots.is_empty() {
+                debug!("No explicit package roots in new config, using automatic discovery");
+                modules::discover_all_package_roots(&[])
+            } else {
+                debug!("Using new configured package roots with automatic discovery enhancement");
+                let mut discovered = modules::discover_all_package_roots(&package_roots);
+                // Add originally configured roots to ensure they're included
+                for root in &package_roots {
+                    if !discovered.contains(root) {
+                        discovered.push(root.clone());
+                    }
+                }
+                discovered
+            };
+
+            // Resolve dependencies from adl-package.json files
+            let all_package_roots = modules::resolve_package_dependencies(&effective_package_roots);
+            
+            debug!("Updated package roots after discovery and dependency resolution:");
+            for root in &all_package_roots {
+                debug!("  - {}", root.display());
+            }
+
+            self.config.package_roots = all_package_roots;
             self.state.clear_cache();
             self.initialize_workspace();
         }
