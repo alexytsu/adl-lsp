@@ -1,4 +1,5 @@
-use std::collections::{HashMap};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use async_lsp::{ClientSocket, LanguageClient};
@@ -17,6 +18,8 @@ pub struct AdlLanguageServerState {
     trees: Arc<RwLock<HashMap<Url, ParsedTree>>>,
     symbols: Arc<RwLock<HashMap<Url, Vec<DocumentSymbol>>>>,
     import_manager: ImportsCache,
+    /// Discovered package roots - maps package root path to whether it's been fully processed
+    package_roots: Arc<RwLock<HashMap<PathBuf, bool>>>,
 }
 
 impl AdlLanguageServerState {
@@ -29,6 +32,44 @@ impl AdlLanguageServerState {
         self.trees.write().expect("poisoned").clear();
         self.symbols.write().expect("poisoned").clear();
         self.import_manager.clear_cache();
+        self.package_roots.write().expect("poisoned").clear();
+    }
+
+    /// Register a discovered package root
+    pub fn register_package_root(&self, package_root: PathBuf, processed: bool) {
+        let mut package_roots = self.package_roots.write().expect("poisoned");
+        package_roots.insert(package_root, processed);
+    }
+
+    /// Check if a package root has been discovered
+    pub fn is_package_root_known(&self, package_root: &PathBuf) -> bool {
+        self.package_roots.read().expect("poisoned").contains_key(package_root)
+    }
+
+    /// Mark a package root as fully processed
+    pub fn mark_package_root_processed(&self, package_root: &PathBuf) {
+        let mut package_roots = self.package_roots.write().expect("poisoned");
+        package_roots.insert(package_root.clone(), true);
+    }
+
+    /// Get all unprocessed package roots
+    pub fn get_unprocessed_package_roots(&self) -> Vec<PathBuf> {
+        self.package_roots
+            .read()
+            .expect("poisoned")
+            .iter()
+            .filter_map(|(path, processed)| if !processed { Some(path.clone()) } else { None })
+            .collect()
+    }
+
+    /// Get all discovered package roots
+    pub fn get_all_package_roots(&self) -> Vec<PathBuf> {
+        self.package_roots
+            .read()
+            .expect("poisoned")
+            .keys()
+            .cloned()
+            .collect()
     }
 
     /// Get the target URI for an identifier from the imports table

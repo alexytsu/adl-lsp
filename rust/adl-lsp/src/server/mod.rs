@@ -123,8 +123,17 @@ impl Server {
         }
     }
 
+    /// Get information about discovered package roots
+    pub fn get_package_roots_info(&self) -> Vec<PathBuf> {
+        self.state.get_all_package_roots()
+    }
+
     fn ingest_document(&mut self, uri: &Url, contents: String) {
         let mut parser = self.parser.lock().expect("poisoned");
+        
+        // Discover package roots from this file if not already known
+        self.discover_and_process_package_from_file(uri, &mut parser);
+        
         self.state.ingest_document(
             &mut self.client,
             &mut parser,
@@ -134,96 +143,74 @@ impl Server {
         );
     }
 
-    /// Initialize the server by discovering and processing all ADL files in package roots
-    pub fn initialize_workspace(&mut self) {
-        debug!("initializing workspace by discovering ADL files in package roots");
-
-        let adl_files = self.discover_adl_files();
-        debug!("found {} ADL files to preprocess", adl_files.len());
-
-        for file_path in &adl_files {
-            if let Ok(uri) = Url::from_file_path(file_path) {
-                // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
-                if let Ok(contents) = std::fs::read_to_string(file_path) {
-                    debug!("preprocessing ADL file: {}", uri);
-                    self.ingest_document(&uri, contents);
-                } else {
-                    error!("failed to read file: {}", file_path.display());
-                }
-            } else {
-                error!("failed to convert path to URI: {}", file_path.display());
+    /// Discover package root from a file path and process all packages in the dependency tree
+    fn discover_and_process_package_from_file(&mut self, file_uri: &Url, parser: &mut AdlParser) {
+        // Convert URI to path
+        let file_path = std::path::PathBuf::from(file_uri.path());
+        
+        // Find the package root for this file
+        if let Some(package_root) = Self::package_root_from_path(&file_path) {
+            let normalized_root = self.normalize_path(&package_root);
+            
+            // Skip if we've already discovered this package root
+            if self.state.is_package_root_known(&normalized_root) {
+                return;
             }
-        }
-
-        debug!("workspace initialization complete");
-        debug!("files processed: {}", &adl_files.len());
-    }
-
-    // TODO(alex): have this accept a AsRef<Path> instead of a &Path?
-    fn package_root_from_path(path: &Path) -> Option<PathBuf> {
-        if !path.exists() {
-            None
-        } else if path.is_dir() && path.join("adl-package.json").exists() {
-            Some(path.to_path_buf())
-        } else {
-            path.parent().and_then(Self::package_root_from_path)
+            
+            debug!("discovered new package root from file {}: {}", file_uri.path(), normalized_root.display());
+            
+            // Register the package root as discovered but not yet processed
+            self.state.register_package_root(normalized_root.clone(), false);
+            
+            // Process this package and its dependencies
+            self.process_package_tree(&normalized_root, parser);
         }
     }
-
-    /// Discover all .adl files in the search dirs and any dependencies specified in adl-package.json
-    fn discover_adl_files(&self) -> Vec<PathBuf> {
-        let mut adl_files = Vec::new();
-
-        // Find the package roots from any search dirs and resolve dependencies recursively
-        let package_roots = match self.resolve_package_dependencies() {
+    
+    /// Process a package root and all its dependencies recursively
+    fn process_package_tree(&mut self, package_root: &std::path::PathBuf, parser: &mut AdlParser) {
+        debug!("processing package tree starting from: {}", package_root.display());
+        
+        // Get all package roots in the dependency tree
+        let all_package_roots = match self.resolve_package_dependencies_from_root(package_root) {
             Ok(roots) => roots,
             Err(e) => {
-                error!("Failed to resolve package dependencies: {}", e);
-                // Fall back to just the search dirs without dependencies
-                self.config.search_dirs.iter().cloned().collect()
+                error!("Failed to resolve package dependencies from {}: {}", package_root.display(), e);
+                // Fall back to just processing the single package
+                let mut roots = HashSet::new();
+                roots.insert(package_root.clone());
+                roots
             }
         };
-
-        for package_root in &package_roots {
-            debug!(
-                "discovering ADL files in package root: {}",
-                package_root.display()
-            );
-
-            if package_root.exists() && package_root.is_dir() {
-                Self::discover_adl_files_recursive(package_root, &mut adl_files);
-            } else {
-                debug!(
-                    "package root does not exist or is not a directory: {}",
-                    package_root.display()
-                );
+        
+        // Process each package root
+        for root in &all_package_roots {
+            if !self.state.is_package_root_known(root) {
+                self.state.register_package_root(root.clone(), false);
             }
+            
+            // Process all ADL files in this package
+            self.process_package_files(root, parser);
+            
+            // Mark as processed
+            self.state.mark_package_root_processed(root);
         }
-
-        debug!("total ADL files discovered: {}", adl_files.len());
-        adl_files
+        
+        debug!("completed processing package tree with {} packages", all_package_roots.len());
     }
-
-    /// Resolve package dependencies recursively using a queue-based approach
-    /// Returns an error if circular dependencies are detected
-    fn resolve_package_dependencies(&self) -> Result<HashSet<PathBuf>, String> {
+    
+    /// Resolve package dependencies starting from a specific package root
+    fn resolve_package_dependencies_from_root(&self, package_root: &std::path::PathBuf) -> Result<HashSet<PathBuf>, String> {
         let mut resolved_roots = HashSet::<PathBuf>::new();
         let mut visited_packages = HashSet::<PathBuf>::new();
         let mut processing_queue = std::collections::VecDeque::new();
 
-        // Initialize queue with search dirs
-        for dir in &self.config.search_dirs {
-            if let Some(root) = Self::package_root_from_path(dir.as_path()) {
-                processing_queue.push_back(root);
-            } else {
-                // If no package root is found, add the explicit search dir as a package root
-                resolved_roots.insert(dir.to_path_buf());
-            }
-        }
+        // Initialize queue with the given package root
+        processing_queue.push_back(package_root.clone());
 
         // Process queue until all dependencies are resolved
-        while let Some(package_root) = processing_queue.pop_front() {
-            let normalized_root = self.normalize_path(&package_root);
+        while let Some(current_root) = processing_queue.pop_front() {
+            let normalized_root = self.normalize_path(&current_root);
             
             // Check for circular dependencies using normalized paths
             if visited_packages.contains(&normalized_root) {
@@ -236,13 +223,13 @@ impl Server {
             visited_packages.insert(normalized_root.clone());
 
             // Check if this package has dependencies
-            let package_definition_file = package_root.join("adl-package.json");
+            let package_definition_file = current_root.join("adl-package.json");
             if package_definition_file.exists() {
                 match std::fs::read_to_string(&package_definition_file) {
                     Ok(package_json) => {
                         match serde_json::from_str::<AdlPackageDefinition>(&package_json) {
                             Ok(package_definition) => {
-                                info!(
+                                debug!(
                                     "found package definition at {}: {:?}",
                                     package_definition_file.display(),
                                     package_definition
@@ -250,7 +237,7 @@ impl Server {
 
                                 // Process each dependency
                                 for dep in &package_definition.dependencies {
-                                    let dep_root = self.resolve_dependency_path(&package_root, &dep.localdir);
+                                    let dep_root = self.resolve_dependency_path(&current_root, &dep.localdir);
                                     let normalized_dep_root = self.normalize_path(&dep_root);
                                     
                                     if dep_root.exists() {
@@ -272,7 +259,7 @@ impl Server {
                                         warn!(
                                             "Dependency path does not exist: {} (from package {})",
                                             dep_root.display(),
-                                            package_root.display()
+                                            current_root.display()
                                         );
                                     }
                                 }
@@ -301,6 +288,114 @@ impl Server {
         }
 
         Ok(resolved_roots)
+    }
+    
+    /// Process all ADL files in a specific package root
+    fn process_package_files(&mut self, package_root: &std::path::PathBuf, parser: &mut AdlParser) {
+        debug!("processing ADL files in package: {}", package_root.display());
+        
+        let mut adl_files = Vec::new();
+        Self::discover_adl_files_recursive(package_root, &mut adl_files);
+        
+        debug!("found {} ADL files in package {}", adl_files.len(), package_root.display());
+        
+        for file_path in &adl_files {
+            if let Ok(uri) = Url::from_file_path(file_path) {
+                // Skip if already processed (might be the file that triggered discovery)
+                if self.state.get_document_tree(&uri).is_some() {
+                    continue;
+                }
+                
+                // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
+                if let Ok(contents) = std::fs::read_to_string(file_path) {
+                    debug!("preprocessing ADL file from package discovery: {}", uri);
+                    self.state.ingest_document(
+                        &mut self.client,
+                        parser,
+                        &self.config.search_dirs,
+                        &uri,
+                        contents,
+                    );
+                } else {
+                    error!("failed to read file: {}", file_path.display());
+                }
+            } else {
+                error!("failed to convert path to URI: {}", file_path.display());
+            }
+        }
+    }
+
+    /// Initialize the server by discovering and processing all ADL files in package roots
+    pub fn initialize_workspace(&mut self) {
+        debug!("initializing workspace by discovering ADL files from search dirs and package roots");
+
+        // Process explicit search directories (may or may not be package roots)
+        let mut processed_search_dirs = HashSet::new();
+        for search_dir in &self.config.search_dirs {
+            debug!("processing explicit search directory: {}", search_dir.display());
+            
+            // Check if this search dir is a package root
+            if let Some(package_root) = Self::package_root_from_path(search_dir) {
+                let normalized_root = self.normalize_path(&package_root);
+                
+                if !self.state.is_package_root_known(&normalized_root) {
+                    debug!("search dir {} is a package root, processing package tree", search_dir.display());
+                    let mut parser = self.parser.lock().expect("poisoned");
+                    self.state.register_package_root(normalized_root.clone(), false);
+                    self.process_package_tree(&normalized_root, &mut parser);
+                }
+                processed_search_dirs.insert(normalized_root);
+            } else {
+                // Process as a regular directory without package structure
+                debug!("search dir {} is not a package root, discovering individual files", search_dir.display());
+                let mut adl_files = Vec::new();
+                if search_dir.exists() && search_dir.is_dir() {
+                    Self::discover_adl_files_recursive(search_dir, &mut adl_files);
+                    
+                    for file_path in &adl_files {
+                        if let Ok(uri) = Url::from_file_path(file_path) {
+                            if let Ok(contents) = std::fs::read_to_string(file_path) {
+                                debug!("preprocessing ADL file from search dir: {}", uri);
+                                self.ingest_document(&uri, contents);
+                            } else {
+                                error!("failed to read file: {}", file_path.display());
+                            }
+                        } else {
+                            error!("failed to convert path to URI: {}", file_path.display());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Get all discovered package roots (from automatic discovery + search dirs)
+        let all_package_roots = self.state.get_all_package_roots();
+        debug!("total package roots discovered: {}", all_package_roots.len());
+        
+        // Process any remaining unprocessed package roots
+        let unprocessed_roots = self.state.get_unprocessed_package_roots();
+        if !unprocessed_roots.is_empty() {
+            debug!("processing {} remaining unprocessed package roots", unprocessed_roots.len());
+            let mut parser = self.parser.lock().expect("poisoned");
+            for package_root in unprocessed_roots {
+                self.process_package_tree(&package_root, &mut parser);
+            }
+        }
+
+        debug!("workspace initialization complete");
+        debug!("search dirs processed: {}", self.config.search_dirs.len());
+        debug!("package roots discovered: {}", all_package_roots.len());
+    }
+
+    // TODO(alex): have this accept a AsRef<Path> instead of a &Path?
+    fn package_root_from_path(path: &Path) -> Option<PathBuf> {
+        if !path.exists() {
+            None
+        } else if path.is_dir() && path.join("adl-package.json").exists() {
+            Some(path.to_path_buf())
+        } else {
+            path.parent().and_then(Self::package_root_from_path)
+        }
     }
 
     /// Resolve a dependency path, handling both relative and absolute paths
@@ -841,8 +936,11 @@ impl Server {
                     .collect()
             });
         if let Ok(search_dirs) = search_dirs {
+            debug!("configuration changed, updating search dirs and clearing caches");
             self.config.search_dirs = search_dirs;
+            // Clear all caches including package roots since search dirs changed
             self.state.clear_cache();
+            // Re-initialize workspace with new configuration
             self.initialize_workspace();
         }
         ControlFlow::Continue(())
@@ -897,7 +995,7 @@ mod tests {
         let server = Server::new(&client, config);
 
         // Test that circular dependency is detected
-        let result = server.resolve_package_dependencies();
+        let result = server.resolve_package_dependencies_from_root(&package_a);
         assert!(result.is_err());
         let error_msg = result.unwrap_err();
         assert!(error_msg.contains("Circular dependency detected"));
@@ -946,7 +1044,7 @@ mod tests {
         let server = Server::new(&client, config);
 
         // Test that dependencies are resolved correctly
-        let result = server.resolve_package_dependencies();
+        let result = server.resolve_package_dependencies_from_root(&package_a);
         assert!(result.is_ok());
         let resolved_roots = result.unwrap();
         
@@ -990,7 +1088,7 @@ mod tests {
         let client = ClientSocket::new_closed();
         let server = Server::new(&client, config);
 
-        let result = server.resolve_package_dependencies();
+        let result = server.resolve_package_dependencies_from_root(&package_a);
         assert!(result.is_ok());
         let resolved_roots = result.unwrap();
         
