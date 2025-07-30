@@ -53,7 +53,7 @@ impl ParsedTree {
             .filter(|n| {
                 // Prefer scoped_name over identifier when they have the same position
                 // This avoids duplicates from scoped_name containing identifier
-                // TODO: this is a hack? we can probably just ignore identifiers
+                // TODO(med): investigate this further. is this is a hack? i think we can probably just ignore identifiers
                 let should_include = if NodeKind::is_scoped_name(n) {
                     true
                 } else if NodeKind::is_identifier(n) {

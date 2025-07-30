@@ -82,7 +82,7 @@ impl NodeKind {
 }
 
 impl NodeKind {
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_kind(s: &str) -> Self {
         match s {
             // Comments and Documentation
             "comment" => Self::Comment,

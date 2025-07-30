@@ -48,7 +48,7 @@ impl ParsedTree {
 
     fn node_to_symbol(&self, node: &Node<'_>, content: &[u8]) -> Option<DocumentSymbol> {
         // Use the actual node kind string instead of mapping through NodeKind enum
-        match NodeKind::from_str(node.kind()) {
+        match NodeKind::from_kind(node.kind()) {
             NodeKind::ModuleDefinition => self.create_symbol(node, content, SymbolKind::MODULE),
             // NOTE: unsure if SymbolKind::CLASS is the best representation of type decls
             NodeKind::TypeDefinition => self.create_symbol(node, content, SymbolKind::CLASS),
@@ -217,5 +217,5 @@ mod test {
         });
     }
     
-    // TODO: add an insta snapshot test
+    // TODO(low): add an insta snapshot test
 }

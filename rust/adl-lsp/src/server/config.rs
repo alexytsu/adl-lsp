@@ -5,33 +5,23 @@ use crate::cli::{Cli, LspClient};
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     _lsp_client: Option<LspClient>,
-    pub package_roots: Vec<PathBuf>,
+    /// Search dirs for adl packages specified by the user - does not include dependencies resolved from adl-package.json
+    pub search_dirs: Vec<PathBuf>,
 }
 
 impl From<&Cli> for ServerConfig {
     fn from(cli: &Cli) -> Self {
-        Self::new(cli.client, cli.package_roots.clone())
+        Self::new(cli.client, cli.search_dirs.clone())
     }
 }
 
 impl ServerConfig {
-    pub fn new(lsp_client: Option<LspClient>, package_roots: Vec<String>) -> Self {
+    pub fn new(lsp_client: Option<LspClient>, search_dirs: Vec<String>) -> Self {
+        // Resolve adl package dependencies in the search dirs
         Self {
-            package_roots: Self::resolve_package_roots(lsp_client, package_roots),
+            // Search dirs should already be resolved to paths (e.g. adl-vscode already resolved ${workspaceFolder} etc.)
+            search_dirs: search_dirs.into_iter().map(PathBuf::from).collect(),
             _lsp_client: lsp_client,
-        }
-    }
-
-    fn resolve_package_roots(
-        lsp_client: Option<LspClient>,
-        package_roots: Vec<String>,
-    ) -> Vec<PathBuf> {
-        match lsp_client {
-            Some(LspClient::VSCode) => {
-                // TODO: deal with {workspaceFolder} etc.
-                package_roots.into_iter().map(PathBuf::from).collect()
-            }
-            None => package_roots.into_iter().map(PathBuf::from).collect(),
         }
     }
 }

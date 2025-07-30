@@ -3,6 +3,15 @@
 All notable changes to the "alexytsu.adl-vscode" extension will be documented in
 this file.
 
+## [0.3.0] - 2025-07-30
+
+This [update](https://github.com/alexytsu/adl-lsp/pull/32) requires version 0.8.0 of `adl-lsp` which brings stability improvements
+- Updated grammar to allow for more permissive parsing partially formed syntax
+- Only attempt to parse files on save
+- More errors reported for missing syntax
+- Updated dark mode icon
+- Better automated discovery of ADL files
+
 ## [0.2.3] - 2025-06-19
 
 Resolves imports via fully qualified names rather than purely looking at the identifier name

@@ -1,6 +1,6 @@
 import v from "vscode";
 export const REQUIRED_MAJOR_VERSION = 0;
-export const REQUIRED_MINOR_VERSION = 7;
+export const REQUIRED_MINOR_VERSION = 8;
 export const REQUIRED_PATCH_VERSION = 0;
 
 export type CheckVersionResult =

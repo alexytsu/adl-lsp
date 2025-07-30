@@ -42,7 +42,7 @@ impl Definition for ParsedTree {
     }
 }
 
-// TODO: handle goto field for annotations
+// TODO(med): handle goto field for annotations
 impl ParsedTree {
     pub fn is_from_definition(node: &Node<'_>) -> bool {
         NodeKind::is_definition(node) || node.parent().is_some_and(|p| Self::is_from_definition(&p))
@@ -148,7 +148,7 @@ impl ParsedTree {
     ) -> DefinitionLocation {
         match d {
             DefinitionKind::Definition(n) => {
-                debug!("Definition: {:?}", n.utf8_text(content.as_ref()));
+                debug!("definition: {:?}", n.utf8_text(content.as_ref()));
                 DefinitionLocation::Resolved(Location {
                     uri: self.uri.clone(),
                     range: Range {
@@ -160,7 +160,7 @@ impl ParsedTree {
             DefinitionKind::Import(import_declaration, identifier) => {
                 DefinitionLocation::Import(UnresolvedImport {
                     source_module: self
-                        .get_module_name(content.as_ref())
+                        .find_module_name(content.as_ref())
                         .expect("expected module name")
                         .to_string(),
                     target_module_path: import_declaration

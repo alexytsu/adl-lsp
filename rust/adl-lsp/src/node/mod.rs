@@ -1,6 +1,8 @@
 mod kind;
+
 pub use kind::NodeKind;
-use tree_sitter::Node;
+use tracing::warn;
+use tree_sitter::{Node, TreeCursor};
 
 /// Type-safe helpers to perform operations on known-node types
 #[allow(dead_code)]
@@ -8,6 +10,13 @@ pub enum AdlNode<'a> {
     Import(AdlImportDeclaration<'a>),
     ScopedName(AdlScopedName<'a>),
     ModuleDefinition(AdlModuleDefinition<'a>),
+    ModuleBody(AdlModuleBody<'a>),
+    TypeDefinition(AdlTypeDefinition<'a>),
+    NewtypeDefinition(AdlNewtypeDefinition<'a>),
+    StructDefinition(AdlStructDefinition<'a>),
+    UnionDefinition(AdlUnionDefinition<'a>),
+    Field(AdlField<'a>),
+    AnnotationDeclaration(AdlAnnotationDeclaration<'a>),
 }
 
 /// A module definition provides a namespace for types and functions that are defined within it
@@ -31,6 +40,7 @@ impl<'a> AdlModuleDefinition<'a> {
         if NodeKind::is_module_definition(&node) {
             Some(AdlModuleDefinition { node })
         } else {
+            warn!("expected a module definition node but got {}", node.kind());
             None
         }
     }
@@ -46,6 +56,12 @@ impl<'a> AdlModuleDefinition<'a> {
             self.node.child(1).expect("expected scoped_name")
         };
         scoped_name.utf8_text(content).expect("utf-8 parse error")
+    }
+
+    pub fn is_missing_semicolon(&self) -> bool {
+        let mut cursor = self.node.walk();
+        let last_child = cursor.goto_last_child();
+        last_child && cursor.node().kind() != ";"
     }
 }
 
@@ -122,6 +138,16 @@ impl<'a> AdlImportDeclaration<'a> {
                 .last(),
             AdlImportDeclaration::StarImport(_) => None,
         }
+    }
+
+    pub fn is_missing_semicolon(&self) -> bool {
+        let node = match self {
+            AdlImportDeclaration::FullyQualified(scoped_name) => &scoped_name.node,
+            AdlImportDeclaration::StarImport(scoped_name) => &scoped_name.node,
+        };
+        let mut cursor = node.walk();
+        let last_child = cursor.goto_last_child();
+        last_child && cursor.node().kind() != ";"
     }
 }
 
@@ -205,3 +231,278 @@ mod test {
         );
     }
 }
+
+/// A module body contains imports, type definitions and annotation declarations
+///
+/// ## Grammar Definition
+/// ```javascript
+/// module_body: ($) =>
+///   seq(
+///     "{",
+///     repeat(
+///       choice(
+///         $.import_declaration,
+///         $.annotation_declaration,
+///         $.type_definition,
+///         $.newtype_definition,
+///         $.struct_definition,
+///         $.union_definition
+///       )
+///     ),
+///     "}"
+/// )
+/// ```
+#[derive(Debug)]
+pub struct AdlModuleBody<'a> {
+    node: Node<'a>,
+}
+
+impl<'a> AdlModuleBody<'a> {
+    pub fn try_new(node: Node<'a>) -> Option<Self> {
+        if NodeKind::is_module_body(&node) {
+            Some(AdlModuleBody { node })
+        } else {
+            None
+        }
+    }
+
+    pub fn cursor(&self) -> TreeCursor {
+        self.node.walk()
+    }
+}
+
+/// A type definition defines a new type
+///
+/// ### Grammar definition
+/// ```javascript
+/// type_definition: ($) =>
+///   seq(
+///     optional($.definition_preamble),
+///     "type",
+///     $.type_name,
+///     optional($.type_parameters),
+///     "=",
+///     $.type_expression,
+///     optional(";")
+///   )
+/// ```
+#[derive(Debug)]
+pub struct AdlTypeDefinition<'a> {
+    node: Node<'a>,
+}
+
+impl<'a> AdlTypeDefinition<'a> {
+    pub fn try_new(node: Node<'a>) -> Option<Self> {
+        if NodeKind::is_type_definition(&node) {
+            Some(AdlTypeDefinition { node })
+        } else {
+            None
+        }
+    }
+
+    pub fn cursor(&self) -> TreeCursor {
+        self.node.walk()
+    }
+
+    pub fn is_missing_semicolon(&self) -> bool {
+        let mut cursor = self.cursor();
+        let last_child = cursor.goto_last_child();
+        last_child && cursor.node().kind() != ";"
+    }
+}
+
+/// A newtype definition defines a new type with a default value
+///
+/// ### Grammar definition
+/// ```javascript
+/// newtype_definition: ($) =>
+///   seq(
+///     optional($.definition_preamble),
+///     "newtype",
+///     $.type_name,
+///     optional($.type_parameters),
+///     "=",
+///     $.type_expression,
+///     optional(seq("=", $.json_value)),
+///     optional(";")
+///   )
+/// ```
+#[derive(Debug)]
+pub struct AdlNewtypeDefinition<'a> {
+    node: Node<'a>,
+}
+
+impl<'a> AdlNewtypeDefinition<'a> {
+    pub fn try_new(node: Node<'a>) -> Option<Self> {
+        if NodeKind::is_newtype_definition(&node) {
+            Some(AdlNewtypeDefinition { node })
+        } else {
+            None
+        }
+    }
+
+    pub fn cursor(&self) -> TreeCursor {
+        self.node.walk()
+    }
+
+    pub fn is_missing_semicolon(&self) -> bool {
+        let mut cursor = self.cursor();
+        let last_child = cursor.goto_last_child();
+        last_child && cursor.node().kind() != ";"
+    }
+}
+
+/// A struct definition defines a new type with named fields
+///
+/// ### Grammar definition
+/// ```javascript
+/// struct_definition: ($) =>
+///   seq(
+///     optional($.definition_preamble),
+///     "struct",
+///     $.type_name,
+///     optional($.type_parameters),
+///     $.field_block,
+///     optional(";")
+///   )
+/// ```
+#[derive(Debug)]
+pub struct AdlStructDefinition<'a> {
+    node: Node<'a>,
+}
+
+impl<'a> AdlStructDefinition<'a> {
+    pub fn try_new(node: Node<'a>) -> Option<Self> {
+        if NodeKind::is_struct_definition(&node) {
+            Some(AdlStructDefinition { node })
+        } else {
+            None
+        }
+    }
+
+    pub fn cursor(&self) -> TreeCursor {
+        self.node.walk()
+    }
+
+    pub fn is_missing_semicolon(&self) -> bool {
+        let mut cursor = self.cursor();
+        let last_child = cursor.goto_last_child();
+        last_child && cursor.node().kind() != ";"
+    }
+}
+
+/// A union definition defines a new type with named fields
+///
+/// ### Grammar definition
+/// ```javascript
+/// union_definition: ($) =>
+///   seq(
+///     optional($.definition_preamble),
+///     "union",
+///     $.type_name,
+///     optional($.type_parameters),
+///     $.field_block,
+///     optional(";")
+///   )
+/// ```
+#[derive(Debug)]
+pub struct AdlUnionDefinition<'a> {
+    node: Node<'a>,
+}
+
+impl<'a> AdlUnionDefinition<'a> {
+    pub fn try_new(node: Node<'a>) -> Option<Self> {
+        if NodeKind::is_union_definition(&node) {
+            Some(AdlUnionDefinition { node })
+        } else {
+            None
+        }
+    }
+
+    pub fn cursor(&self) -> TreeCursor {
+        self.node.walk()
+    }
+
+    pub fn is_missing_semicolon(&self) -> bool {
+        let mut cursor = self.cursor();
+        let last_child = cursor.goto_last_child();
+        last_child && cursor.node().kind() != ";"
+    }
+}
+
+/// A field defines a named field in a struct or union
+///
+/// ### Grammar definition
+/// ```javascript
+/// field: ($) =>
+///   seq(
+///     optional($.definition_preamble),
+///     $.type_expression,
+///     $.identifier,
+///     optional(seq("=", $.json_value)),
+///     optional(";")
+///   )
+/// ```
+#[derive(Debug)]
+pub struct AdlField<'a> {
+    node: Node<'a>,
+}
+
+impl<'a> AdlField<'a> {
+    pub fn try_new(node: Node<'a>) -> Option<Self> {
+        if NodeKind::is_field(&node) {
+            Some(AdlField { node })
+        } else {
+            None
+        }
+    }
+
+    pub fn cursor(&self) -> TreeCursor {
+        self.node.walk()
+    }
+
+    pub fn is_missing_semicolon(&self) -> bool {
+        let mut cursor = self.cursor();
+        let last_child = cursor.goto_last_child();
+        last_child && cursor.node().kind() != ";"
+    }
+}
+
+/// An annotation declaration defines a new annotation
+///
+/// ### Grammar definition
+/// ```javascript
+/// annotation_declaration: ($) =>
+///   seq(
+///     "annotation",
+///     seq($.scoped_name, repeat(seq("::", $.field_reference))),
+///     $.scoped_name,
+///     $.json_value,
+///     optional(";")
+///   )
+/// ```
+#[derive(Debug)]
+pub struct AdlAnnotationDeclaration<'a> {
+    node: Node<'a>,
+}
+
+impl<'a> AdlAnnotationDeclaration<'a> {
+    pub fn try_new(node: Node<'a>) -> Option<Self> {
+        if NodeKind::is_annotation_declaration(&node) {
+            Some(AdlAnnotationDeclaration { node })
+        } else {
+            None
+        }
+    }
+
+    pub fn cursor(&self) -> TreeCursor {
+        self.node.walk()
+    }
+
+    pub fn is_missing_semicolon(&self) -> bool {
+        let mut cursor = self.cursor();
+        let last_child = cursor.goto_last_child();
+        last_child && cursor.node().kind() != ";"
+    }
+}
+

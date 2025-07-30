@@ -34,7 +34,7 @@ This extension contributes the following settings:
 
 - `adl.lspPath`: If you ran `cargo install adl-lsp` set this to
   "~/.cargo/bin/adl-lsp"
-- `adl.packageRoots`: ADL package locations. An ADL package is the directory
+- `adl.searchDirs`: ADL package locations. An ADL package is the directory
   that contains top-level ADL modules.
 
 ## Publishing checklist
@@ -43,5 +43,6 @@ This extension contributes the following settings:
 - Update the [changelog](./CHANGELOG.md)
 - Update the minimum `adl-lsp` version number in
   [check-version.ts](./src/check-version.ts) if necessary
-- `vsce publish`
+- `git commit -am "adl-vscode version ${SEMVER}"`
 - `git tag -a -f -m "adl-vscode-${SEMVER}" adl-vscode-${SEMVER}`
+- `vsce publish`

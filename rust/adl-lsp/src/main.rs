@@ -1,4 +1,3 @@
-use std::ops::ControlFlow;
 use std::time::Duration;
 
 use async_lsp::client_monitor::ClientProcessMonitorLayer;
@@ -8,19 +7,16 @@ use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::tracing::TracingLayer;
 use clap::Parser;
-use lsp_types::{notification, request};
 use tower::ServiceBuilder;
-use tracing::{Level, debug, trace};
+use tracing::{Level, debug};
 
 use crate::cli::Cli;
-use crate::server::Server;
+use crate::server::{Server, TickEvent};
 
 mod cli;
 mod node;
 mod parser;
 mod server;
-
-struct TickEvent;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -40,61 +36,7 @@ async fn main() {
             }
         });
 
-        let mut router: Router<Server> = Server::new(&client, (&cli).into()).into();
-
-        router
-            .request::<request::Initialize, _>(|st, params| {
-                let mut st = st.clone();
-                async move { st.handle_initialize(params).await }
-            })
-            .request::<request::Shutdown, _>(|st, _| {
-                let st = st.clone();
-                async move { st.handle_shutdown().await }
-            })
-            .request::<request::HoverRequest, _>(|st, params| {
-                let mut st = st.clone();
-                async move { st.handle_hover_request(params).await }
-            })
-            .request::<request::GotoDefinition, _>(|st, params| {
-                let mut st = st.clone();
-                async move { st.handle_goto_definition(params) }
-            })
-            .request::<request::References, _>(|st, params| {
-                let mut st = st.clone();
-                async move { st.handle_find_references(params) }
-            })
-            .request::<request::DocumentDiagnosticRequest, _>(|st, params| {
-                let mut st = st.clone();
-                async move { st.handle_document_diagnostic_request(params) }
-            })
-            .request::<request::DocumentSymbolRequest, _>(|st, params| {
-                let mut st = st.clone();
-                async move { st.handle_document_symbol_request(params) }
-            })
-            .notification::<notification::DidOpenTextDocument>(|st, params| {
-                trace!("did open text document: {:?}", params);
-                st.handle_did_open_text_document(params)
-            })
-            .notification::<notification::DidChangeTextDocument>(|st, params| {
-                trace!("did change text document: {:?}", params);
-                st.handle_did_change_text_document(params)
-            })
-            .notification::<notification::DidSaveTextDocument>(|st, params| {
-                trace!("did save text document: {:?}", params);
-                st.handle_did_save_text_document(params)
-            })
-            .notification::<notification::DidCloseTextDocument>(|st, params| {
-                trace!("did close text document: {:?}", params);
-                st.handle_did_close_text_document(params)
-            })
-            .notification::<notification::Exit>(|st, _| st.handle_exit())
-            // TODO: handle these notifications
-            .notification::<notification::Initialized>(|_, _| ControlFlow::Continue(()))
-            .notification::<notification::DidChangeConfiguration>(|st, params| {
-                trace!("did change configuration: {:?}", params);
-                st.handle_did_change_configuration(params)
-            })
-            .event::<TickEvent>(|st, _| st.handle_tick_event());
+        let router: Router<Server> = Server::new(&client, (&cli).into()).into();
 
         ServiceBuilder::new()
             .layer(TracingLayer::default())

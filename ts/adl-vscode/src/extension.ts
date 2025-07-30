@@ -7,7 +7,7 @@ import {
 } from "vscode-languageclient/node";
 import { checkVersionAndNotify } from "./check-version";
 import { registerCommands } from "./commands";
-import { getLspExecutable, getPackageRoots } from "./config";
+import { getLspExecutable, getSearchDirs } from "./config";
 
 let client: LanguageClient;
 
@@ -39,10 +39,10 @@ export async function activate(context: v.ExtensionContext) {
 
   v.workspace.onDidChangeConfiguration(async (e) => {
     console.log("Configuration changed: ", e);
-    if (e.affectsConfiguration("adl.packageRoots")) {
+    if (e.affectsConfiguration("adl.searchDirs")) {
       client.sendNotification(DidChangeConfigurationNotification.type, {
         settings: {
-          packageRoots: getPackageRoots(),
+          searchDirs: getSearchDirs(),
         },
       });
     }

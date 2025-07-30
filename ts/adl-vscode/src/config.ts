@@ -3,19 +3,23 @@ import path from "path";
 import os from "os";
 import { Executable } from "vscode-languageclient/node";
 
-export function getPackageRoots(): string[] {
+/**
+ *
+ * @returns A list of directories to search fo ADL files (not necessarily ADL package roots, just the whole world we care about)
+ */
+export function getSearchDirs(): string[] {
   const adlPackageRootsConfig = v.workspace
     .getConfiguration("adl")
-    .get("packageRoots");
+    .get("searchDirs");
 
-  let _adlPackageRoots: string[];
+  let _searchDirs: string[];
   if (adlPackageRootsConfig instanceof Array) {
-    _adlPackageRoots = adlPackageRootsConfig;
+    _searchDirs = adlPackageRootsConfig;
   } else {
-    _adlPackageRoots = ["adl"];
+    _searchDirs = ["."];
   }
 
-  return _adlPackageRoots.map((root) => {
+  return _searchDirs.map((root) => {
     const relativePath = v.workspace.asRelativePath(root, true);
 
     // Get the workspace root
@@ -55,14 +59,14 @@ export function getLspExecutable(): {
   dev: Executable;
   prod: Executable;
 } {
-  const adlPackageRoots = getPackageRoots();
+  const adlSearchDirs = getSearchDirs();
   const adlLspPath = getLspPath();
 
   const adlLspArgs = [
     "--client",
     "vscode",
-    "--package-roots",
-    adlPackageRoots.join(","),
+    "--search-dirs",
+    adlSearchDirs.join(","),
   ];
 
   return {

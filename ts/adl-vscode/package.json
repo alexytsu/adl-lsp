@@ -5,7 +5,7 @@
   "repository": "https://github.com/alexytsu/adl-lsp",
   "icon": "assets/adl-icon.png",
   "publisher": "alexytsu",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -23,7 +23,7 @@
           "default": "~/.cargo/bin/adl-lsp",
           "description": "Path to the ADL server executable."
         },
-        "adl.packageRoots": {
+        "adl.searchDirs": {
           "type": "array",
           "items": {
             "type": "string"
@@ -31,7 +31,7 @@
           "default": [
             "adl"
           ],
-          "description": "Root directories where ADL packages are located"
+          "description": "A list of directories to add to the ADL search path."
         }
       }
     },
