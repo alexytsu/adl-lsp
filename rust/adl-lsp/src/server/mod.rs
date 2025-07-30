@@ -125,12 +125,8 @@ impl Server {
 
     fn ingest_document(&mut self, uri: &Url, contents: String) {
         let mut parser = self.parser.lock().expect("poisoned");
-        self.state.ingest_document(
-            &mut self.client,
-            &mut parser,
-            uri,
-            contents,
-        );
+        self.state
+            .ingest_document(&mut self.client, &mut parser, uri, contents);
     }
 
     /// Initialize the server by discovering and processing all ADL files in package roots
@@ -165,7 +161,7 @@ impl Server {
         let mut package_root_to_adl_files = HashMap::<PathBuf, HashSet<Url>>::new();
 
         // Find the package roots from any search dirs and resolve dependencies recursively
-        let package_roots = match Self::resolve_package_dependencies(&self.config.search_dirs) {
+        let mut package_roots = match Self::resolve_package_dependencies(&self.config.search_dirs) {
             Ok(roots) => roots,
             Err(e) => {
                 error!("Failed to resolve package dependencies: {}", e);
@@ -173,6 +169,12 @@ impl Server {
                 self.config.search_dirs.iter().cloned().collect()
             }
         };
+
+        if package_roots.is_empty() {
+            if let Ok(cwd) = std::env::current_dir() {
+                package_roots.insert(cwd);
+            }
+        }
 
         for package_root in &package_roots {
             debug!(
