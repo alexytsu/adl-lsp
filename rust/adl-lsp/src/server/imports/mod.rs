@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use async_lsp::lsp_types::Url;
@@ -8,7 +9,7 @@ use tracing::{debug, trace};
 use crate::node::{AdlImportDeclaration, AdlModuleDefinition, NodeKind};
 use crate::parser::ParsedTree;
 use crate::parser::tree::Tree;
-use crate::server::modules;
+use crate::server::packages;
 
 mod fqn;
 pub use fqn::Fqn;
@@ -46,8 +47,8 @@ impl ImportsCache {
             .cloned()
     }
 
-    /// Get all files that import a specific type
-    pub fn get_files_importing_type(&self, fqn: &Fqn) -> Vec<Url> {
+    /// Lookup (from the cache) all files that import a specific type
+    pub fn lookup_files_that_import(&self, fqn: &Fqn) -> Vec<Url> {
         let imported_symbols = self.imported_symbols.read().expect("poisoned");
         imported_symbols
             .iter()
@@ -62,7 +63,7 @@ impl ImportsCache {
     }
 
     /// Add a validated import to the table, registering its import and definition
-    fn add_import(&self, source_uri: &Url, fqn: &Fqn, target_uri: &Url) {
+    fn register_import(&self, source_uri: &Url, fqn: &Fqn, target_uri: &Url) {
         let mut definition_locations = self.definition_locations.write().expect("poisoned");
         let mut imported_symbols = self.imported_symbols.write().expect("poisoned");
         let mut defined_symbols = self.defined_symbols.write().expect("poisoned");
@@ -79,7 +80,7 @@ impl ImportsCache {
     }
 
     /// Add a definition to the table (for symbols defined in a file)
-    fn add_definition(&self, source_uri: &Url, fqn: &Fqn) {
+    fn register_definition(&self, source_uri: &Url, fqn: &Fqn) {
         let mut definition_locations = self.definition_locations.write().expect("poisoned");
         let mut defined_symbols = self.defined_symbols.write().expect("poisoned");
 
@@ -123,9 +124,9 @@ pub trait ImportManager {
     fn clear_cache(&mut self);
 
     /// Resolve imports from a document and populate the imports table
-    fn resolve_document_imports(
+    fn resolve_and_register_imports(
         &self,
-        search_dirs: &[std::path::PathBuf],
+        search_dirs: &HashMap<PathBuf, HashSet<Url>>,
         source_uri: &Url,
         tree: &ParsedTree,
         content: &[u8],
@@ -145,9 +146,9 @@ impl ImportManager for ImportsCache {
     }
 
     /// Resolve imports from a document and populate the imports table
-    fn resolve_document_imports(
+    fn resolve_and_register_imports(
         &self,
-        search_dirs: &[std::path::PathBuf],
+        search_dirs: &HashMap<PathBuf, HashSet<Url>>,
         source_uri: &Url,
         source_tree: &ParsedTree,
         source_content: &[u8],
@@ -156,12 +157,12 @@ impl ImportManager for ImportsCache {
         trace!("resolving imports for document: {}", source_uri);
 
         // Check that this document defines a module
-        let module_definition = if let Some(module_definition) = source_tree.get_module_definition()
-        {
-            module_definition
-        } else {
-            return;
-        };
+        let module_definition =
+            if let Some(module_definition) = source_tree.find_module_definition() {
+                module_definition
+            } else {
+                return;
+            };
 
         // Clear existing imports for this source
         self.clear_source_caches(source_uri);
@@ -176,7 +177,7 @@ impl ImportManager for ImportsCache {
             .filter_map(AdlImportDeclaration::try_new);
 
         for import_node in import_nodes {
-            self.process_import_declaration(
+            self.register_import_declaration(
                 search_dirs,
                 source_uri,
                 module_definition.module_name(source_content),
@@ -198,7 +199,7 @@ impl ImportsCache {
 
         // Register each definition in the cache
         for definition in type_definitions {
-            self.add_definition(source_uri, &definition);
+            self.register_definition(source_uri, &definition);
         }
     }
 
@@ -208,9 +209,9 @@ impl ImportsCache {
     /// `source_content` is the text content of the source document
     /// `import_node` is the import declaration node to process
     /// `get_or_parse_document_tree` is a function that returns a parsed tree for a given document URI
-    fn process_import_declaration(
+    fn register_import_declaration(
         &self,
-        search_dirs: &[std::path::PathBuf],
+        search_dirs: &HashMap<PathBuf, HashSet<Url>>,
         source_uri: &Url,
         source_module: &str,
         source_content: &[u8],
@@ -248,7 +249,7 @@ impl ImportsCache {
     /// Expand a star import by finding all type definitions in the target module
     fn expand_star_import(
         &self,
-        search_dirs: &[std::path::PathBuf],
+        search_dirs: &HashMap<PathBuf, HashSet<Url>>,
         source_uri: &Url,
         source_module: &str,
         imported_module_path: &Vec<&str>,
@@ -256,7 +257,7 @@ impl ImportsCache {
     ) {
         debug!("expanding star import from {:?}", imported_module_path);
 
-        let imported_module = modules::resolve_import(
+        let imported_module = packages::resolve_import(
             search_dirs,
             source_uri,
             source_module,
@@ -266,7 +267,6 @@ impl ImportsCache {
 
         if let Some(ref target_uri) = imported_module {
             // Try to read the target module
-            // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
             if let Ok(target_content) = std::fs::read_to_string(target_uri.path()) {
                 // Get or parse the target tree
                 if let Some(target_tree) = get_or_parse_document_tree(target_uri) {
@@ -276,14 +276,14 @@ impl ImportsCache {
 
                     // Add each type definition as an imported symbol
                     for ref type_name in type_definitions {
-                        self.add_import(source_uri, type_name, target_uri);
+                        self.register_import(source_uri, type_name, target_uri);
                     }
                 }
             }
         }
     }
 
-    /// Find all type definition names in a parsed tree
+    /// Find all type definitions in a parsed tree and return their FQNs
     fn find_type_definitions(&self, tree: &ParsedTree, content: &[u8]) -> Vec<Fqn> {
         let module_definition_node = tree.find_first_node(NodeKind::is_module_definition);
 
@@ -301,7 +301,7 @@ impl ImportsCache {
         let type_def_nodes = tree.find_all_nodes(NodeKind::is_local_definition);
 
         for type_def in type_def_nodes {
-            // TODO: create an AdlNode here to handle the type name logic
+            // TODO(med): use a custom AdlNode here to handle the type name logic
             // The type name is the first child that is a type_name
             if let Some(type_name_node) = type_def
                 .children(&mut type_def.walk())
@@ -314,14 +314,14 @@ impl ImportsCache {
             }
         }
 
-        debug!("found type definitions: {:?}", type_definitions);
+        // debug!("found type definitions: {:?}", type_definitions);
         type_definitions
     }
 
     /// Resolve a fully-qualified import
     fn resolve_fully_qualified_import(
         &self,
-        search_dirs: &[std::path::PathBuf],
+        search_dirs: &HashMap<PathBuf, HashSet<Url>>,
         source_uri: &Url,
         source_module: &str,
         import: &Fqn,
@@ -329,23 +329,25 @@ impl ImportsCache {
         debug!("resolving fully-qualified import: {:?}", import);
 
         // Resolve the module paths
-        let possible_paths = modules::resolve_import(
+        let possible_path = packages::resolve_import(
             search_dirs,
             source_uri,
             source_module,
-            &import.module_path(),
+            &import.module_path_parts(),
             &|path| fs::exists(path).is_ok_and(|exists| exists),
         );
 
-        if let Some(ref target_uri) = possible_paths {
+        if let Some(ref target_uri) = possible_path {
             // Only add the symbol if the target file actually exists
             if std::fs::metadata(target_uri.path()).is_ok() {
                 trace!(
                     "target file exists, adding to imports table: {}",
                     target_uri.path()
                 );
-                // TODO: check if the target file actually contains the definition
-                self.add_import(source_uri, import, target_uri);
+                // TODO(high): check if the target file actually contains the definition
+                // right now the LSP blindly trust the import and assume that the target file defines it
+                // here's an opportunity to publish diagnostics for invalid imports
+                self.register_import(source_uri, import, target_uri);
             } else {
                 trace!(
                     "target file does not exist, skipping: {}",

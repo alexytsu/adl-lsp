@@ -232,7 +232,8 @@ impl ParsedTree {
             })
             .collect();
 
-        // TODO: attempt to resolve the imports and report errors for invalid imports
+        // TODO(med): attempt to resolve imports and report errors for invalid imports
+        // TODO(med): check for unused or duplicate imports
 
         Some(out_of_order_imports)
     }

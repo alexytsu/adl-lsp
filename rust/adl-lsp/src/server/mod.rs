@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_lsp::router::Router;
@@ -30,12 +30,12 @@ use crate::parser::symbols::DocumentSymbols;
 use crate::parser::{AdlParser, ParsedTree};
 use crate::server::config::ServerConfig;
 use crate::server::imports::Fqn;
-use crate::server::modules::AdlPackageDefinition;
+use crate::server::packages::AdlPackageDefinition;
 use crate::server::state::AdlLanguageServerState;
 
 pub mod config;
 mod imports;
-mod modules;
+mod packages;
 mod state;
 
 pub struct TickEvent;
@@ -128,7 +128,6 @@ impl Server {
         self.state.ingest_document(
             &mut self.client,
             &mut parser,
-            &self.config.search_dirs,
             uri,
             contents,
         );
@@ -138,44 +137,35 @@ impl Server {
     pub fn initialize_workspace(&mut self) {
         debug!("initializing workspace by discovering ADL files in package roots");
 
-        let adl_files = self.discover_adl_files();
-        debug!("found {} ADL files to preprocess", adl_files.len());
+        let (adl_file_to_package_root, package_root_to_adl_files) = self.discover_adl_files();
 
-        for file_path in &adl_files {
-            if let Ok(uri) = Url::from_file_path(file_path) {
-                // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
-                if let Ok(contents) = std::fs::read_to_string(file_path) {
+        debug!(
+            "discovered {} ADL packages containing {} files",
+            &package_root_to_adl_files.len(),
+            &adl_file_to_package_root.len()
+        );
+
+        adl_file_to_package_root
+            .iter()
+            .for_each(|(uri, _package_root)| {
+                if let Ok(contents) = std::fs::read_to_string(uri.path()) {
                     debug!("preprocessing ADL file: {}", uri);
-                    self.ingest_document(&uri, contents);
+                    self.ingest_document(uri, contents);
                 } else {
-                    error!("failed to read file: {}", file_path.display());
+                    error!("failed to read file: {}", uri.path());
                 }
-            } else {
-                error!("failed to convert path to URI: {}", file_path.display());
-            }
-        }
+            });
 
-        debug!("workspace initialization complete");
-        debug!("files processed: {}", &adl_files.len());
-    }
-
-    // TODO(alex): have this accept a AsRef<Path> instead of a &Path?
-    fn package_root_from_path(path: &Path) -> Option<PathBuf> {
-        if !path.exists() {
-            None
-        } else if path.is_dir() && path.join("adl-package.json").exists() {
-            Some(path.to_path_buf())
-        } else {
-            path.parent().and_then(Self::package_root_from_path)
-        }
+        debug!("workspace initialization complete: files processed",);
     }
 
     /// Discover all .adl files in the search dirs and any dependencies specified in adl-package.json
-    fn discover_adl_files(&self) -> Vec<PathBuf> {
-        let mut adl_files = Vec::new();
+    fn discover_adl_files(&self) -> (HashMap<Url, PathBuf>, HashMap<PathBuf, HashSet<Url>>) {
+        let mut adl_file_to_package_root = HashMap::<Url, PathBuf>::new();
+        let mut package_root_to_adl_files = HashMap::<PathBuf, HashSet<Url>>::new();
 
         // Find the package roots from any search dirs and resolve dependencies recursively
-        let package_roots = match self.resolve_package_dependencies() {
+        let package_roots = match Self::resolve_package_dependencies(&self.config.search_dirs) {
             Ok(roots) => roots,
             Err(e) => {
                 error!("Failed to resolve package dependencies: {}", e);
@@ -189,6 +179,7 @@ impl Server {
                 "discovering ADL files in package root: {}",
                 package_root.display()
             );
+            let mut adl_files = HashSet::<PathBuf>::new();
 
             if package_root.exists() && package_root.is_dir() {
                 Self::discover_adl_files_recursive(package_root, &mut adl_files);
@@ -198,22 +189,37 @@ impl Server {
                     package_root.display()
                 );
             }
+
+            for adl_file in &adl_files {
+                let file_uri = Url::from_file_path(adl_file);
+                if let Ok(file_uri) = file_uri {
+                    adl_file_to_package_root.insert(file_uri.clone(), package_root.clone());
+                    package_root_to_adl_files
+                        .entry(package_root.clone())
+                        .or_default()
+                        .insert(file_uri);
+                }
+            }
+            debug!(
+                "package root {} had {} ADL files",
+                package_root.display(),
+                adl_files.len()
+            );
         }
 
-        debug!("total ADL files discovered: {}", adl_files.len());
-        adl_files
+        (adl_file_to_package_root, package_root_to_adl_files)
     }
 
     /// Resolve package dependencies recursively using a queue-based approach
     /// Returns an error if circular dependencies are detected
-    fn resolve_package_dependencies(&self) -> Result<HashSet<PathBuf>, String> {
+    fn resolve_package_dependencies(search_dirs: &[PathBuf]) -> Result<HashSet<PathBuf>, String> {
         let mut resolved_roots = HashSet::<PathBuf>::new();
         let mut visited_packages = HashSet::<PathBuf>::new();
         let mut processing_queue = std::collections::VecDeque::new();
 
         // Initialize queue with search dirs
-        for dir in &self.config.search_dirs {
-            if let Some(root) = Self::package_root_from_path(dir.as_path()) {
+        for dir in search_dirs {
+            if let Some(root) = packages::find_package_root_by_marker(dir.as_path()) {
                 processing_queue.push_back(root);
             } else {
                 // If no package root is found, add the explicit search dir as a package root
@@ -223,8 +229,8 @@ impl Server {
 
         // Process queue until all dependencies are resolved
         while let Some(package_root) = processing_queue.pop_front() {
-            let normalized_root = self.normalize_path(&package_root);
-            
+            let normalized_root = packages::normalize_path(&package_root);
+
             // Check for circular dependencies using normalized paths
             if visited_packages.contains(&normalized_root) {
                 return Err(format!(
@@ -250,9 +256,12 @@ impl Server {
 
                                 // Process each dependency
                                 for dep in &package_definition.dependencies {
-                                    let dep_root = self.resolve_dependency_path(&package_root, &dep.localdir);
-                                    let normalized_dep_root = self.normalize_path(&dep_root);
-                                    
+                                    let dep_root = packages::resolve_dependency_path(
+                                        &package_root,
+                                        &dep.localdir,
+                                    );
+                                    let normalized_dep_root = packages::normalize_path(&dep_root);
+
                                     if dep_root.exists() {
                                         // Check for circular dependency first
                                         if visited_packages.contains(&normalized_dep_root) {
@@ -262,7 +271,7 @@ impl Server {
                                                 normalized_dep_root.display()
                                             ));
                                         }
-                                        
+
                                         // Add to queue for processing if not already resolved
                                         if !resolved_roots.contains(&normalized_dep_root) {
                                             processing_queue.push_back(dep_root.clone());
@@ -303,31 +312,15 @@ impl Server {
         Ok(resolved_roots)
     }
 
-    /// Resolve a dependency path, handling both relative and absolute paths
-    fn resolve_dependency_path<T: AsRef<Path>>(&self, package_root: T, localdir: &str) -> PathBuf {
-        // Check if it's an absolute path
-        if localdir.starts_with('/') {
-            PathBuf::from(localdir)
-        } else {
-            // Treat as relative path from package root
-            package_root.as_ref().join(localdir)
-        }
-    }
-
-    /// Normalize a path by resolving all relative components
-    fn normalize_path<T: AsRef<Path>>(&self, path: T) -> PathBuf {
-        path.as_ref().canonicalize().unwrap_or_else(|_| path.as_ref().to_path_buf())
-    }
-
     /// Recursively discover .adl files in a directory
-    fn discover_adl_files_recursive(dir: &PathBuf, adl_files: &mut Vec<PathBuf>) {
+    fn discover_adl_files_recursive(dir: &PathBuf, adl_files: &mut HashSet<PathBuf>) {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
 
                 if path.is_dir() {
                     // Skip hidden directories and common build/output directories
-                    // TODO: look for .gitignore files and also ignore them
+                    // TODO(med): look for .gitignore files and also ignore them
                     if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
                         if !dir_name.starts_with('.')
                             && dir_name != "target"
@@ -344,14 +337,15 @@ impl Server {
                     .is_some_and(|ext| ext.to_lowercase().contains("adl"))
                 {
                     debug!("found ADL file: {}", path.display());
-                    adl_files.push(path);
+                    adl_files.insert(path);
                 }
             }
         }
     }
 
     pub async fn handle_shutdown(&self) -> Result<(), ResponseError> {
-        // TODO: cleanup? after shutdown, should respond with InvalidRequest to all other requests
+        // TODO(low): perform cleanup of any background tasks and threads
+        // TODO(low): after shutdown, the server should respond with InvalidRequest to all other requests
         debug!("shutting down server");
         Ok(())
     }
@@ -415,7 +409,9 @@ impl Server {
                         work_done_progress_options: WorkDoneProgressOptions {
                             work_done_progress: None,
                         },
-                        workspace_diagnostics: false, // TODO: check that modules are defined in the correctly structured files
+                        // TODO(low): enable workspace diagnostics once we have a way to check module positioning
+                        // e.g. module a.b.c must live on disk as ../somepath/a/b/c.adl
+                        workspace_diagnostics: false,
                     },
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
@@ -490,7 +486,6 @@ impl Server {
 
         // If not found, try to parse the file
         if let Ok(content) = std::fs::read_to_string(uri.path()) {
-            // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
             debug!("Parsing target document for LSP operation: {}", uri);
             self.ingest_document(uri, content);
             return self.state.get_document_tree(uri);
@@ -507,7 +502,6 @@ impl Server {
         }
 
         // If not found, try to parse the file
-        // TODO: don't read from disk if it's already open (owned by client and should already be parsed)
         if let Ok(content) = std::fs::read_to_string(uri.path()) {
             debug!("Parsing target document for LSP operation: {}", uri);
             self.ingest_document(uri, content.clone());
@@ -653,7 +647,7 @@ impl Server {
         // First, find references in the current file
         let local_references = tree.find_references(identifier, contents);
         all_references.extend(local_references);
-        let module_name = tree.get_module_name(contents).ok_or_else(|| {
+        let module_name = tree.find_module_name(contents).ok_or_else(|| {
             error!("could not get module name for document: {}", uri);
             ResponseError::new(ErrorCode::INTERNAL_ERROR, "could not get module name")
         })?;
@@ -690,11 +684,11 @@ impl Server {
                 {
                     let imported_references =
                         importing_tree.find_references(identifier, importing_content.as_bytes());
-                    debug!(
-                        "Found {} references in file {}",
-                        imported_references.len(),
-                        importing_file_uri
-                    );
+                    // debug!(
+                    //     "Found {} references in file {}",
+                    //     imported_references.len(),
+                    //     importing_file_uri
+                    // );
                     all_references.extend(imported_references);
                 }
             }
@@ -869,7 +863,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let package_a = temp_dir.path().join("package_a");
         let package_b = temp_dir.path().join("package_b");
-        
+
         fs::create_dir_all(&package_a).unwrap();
         fs::create_dir_all(&package_b).unwrap();
 
@@ -893,11 +887,9 @@ mod tests {
 
         // Create a server with package_a as search dir
         let config = ServerConfig::new(None, vec![package_a.to_string_lossy().to_string()]);
-        let client = ClientSocket::new_closed();
-        let server = Server::new(&client, config);
 
         // Test that circular dependency is detected
-        let result = server.resolve_package_dependencies();
+        let result = Server::resolve_package_dependencies(&config.search_dirs);
         assert!(result.is_err());
         let error_msg = result.unwrap_err();
         assert!(error_msg.contains("Circular dependency detected"));
@@ -910,7 +902,7 @@ mod tests {
         let package_a = temp_dir.path().join("package_a");
         let package_b = temp_dir.path().join("package_b");
         let package_c = temp_dir.path().join("package_c");
-        
+
         fs::create_dir_all(&package_a).unwrap();
         fs::create_dir_all(&package_b).unwrap();
         fs::create_dir_all(&package_c).unwrap();
@@ -942,19 +934,17 @@ mod tests {
 
         // Create a server with package_a as search dir
         let config = ServerConfig::new(None, vec![package_a.to_string_lossy().to_string()]);
-        let client = ClientSocket::new_closed();
-        let server = Server::new(&client, config);
 
         // Test that dependencies are resolved correctly
-        let result = server.resolve_package_dependencies();
+        let result = Server::resolve_package_dependencies(&config.search_dirs);
         assert!(result.is_ok());
         let resolved_roots = result.unwrap();
-        
+
         // Should contain all three packages (using normalized paths for comparison)
-        let normalized_package_a = server.normalize_path(&package_a);
-        let normalized_package_b = server.normalize_path(&package_b);
-        let normalized_package_c = server.normalize_path(&package_c);
-        
+        let normalized_package_a = packages::normalize_path(&package_a);
+        let normalized_package_b = packages::normalize_path(&package_b);
+        let normalized_package_c = packages::normalize_path(&package_c);
+
         assert!(resolved_roots.contains(&normalized_package_a));
         assert!(resolved_roots.contains(&normalized_package_b));
         assert!(resolved_roots.contains(&normalized_package_c));
@@ -966,17 +956,20 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let package_a = temp_dir.path().join("package_a");
         let package_b = temp_dir.path().join("package_b");
-        
+
         fs::create_dir_all(&package_a).unwrap();
         fs::create_dir_all(&package_b).unwrap();
 
         // Create package A that depends on package B using absolute path
-        let package_a_json = format!(r#"{{
+        let package_a_json = format!(
+            r#"{{
             "name": "package_a",
             "dependencies": [
                 {{"localdir": "{}"}}
             ]
-        }}"#, package_b.to_string_lossy());
+        }}"#,
+            package_b.to_string_lossy()
+        );
         fs::write(package_a.join("adl-package.json"), package_a_json).unwrap();
 
         // Create package B with no dependencies
@@ -987,17 +980,15 @@ mod tests {
         fs::write(package_b.join("adl-package.json"), package_b_json).unwrap();
 
         let config = ServerConfig::new(None, vec![package_a.to_string_lossy().to_string()]);
-        let client = ClientSocket::new_closed();
-        let server = Server::new(&client, config);
 
-        let result = server.resolve_package_dependencies();
+        let result = Server::resolve_package_dependencies(&config.search_dirs);
         assert!(result.is_ok());
         let resolved_roots = result.unwrap();
-        
+
         // Should contain both packages (using normalized paths for comparison)
-        let normalized_package_a = server.normalize_path(&package_a);
-        let normalized_package_b = server.normalize_path(&package_b);
-        
+        let normalized_package_a = packages::normalize_path(&package_a);
+        let normalized_package_b = packages::normalize_path(&package_b);
+
         assert!(resolved_roots.contains(&normalized_package_a));
         assert!(resolved_roots.contains(&normalized_package_b));
         assert_eq!(resolved_roots.len(), 2);

@@ -44,7 +44,8 @@ impl ParsedTree {
 
     // HACK: since the doccomments are themselves valid ADL and are part of the definition node,
     // we can just return the entire definition node as the hover text with LanguageString for sensible highlighting
-    // TODO: we should return the doccomments as a MarkedString::String and the definition text as a MarkedString::LanguageString
+    // though this might need some coordination and restructuring of the tree-sitter grammar
+    // TODO(low): we should return the doccomments as a MarkedString::String and the definition text as a MarkedString::LanguageString
     fn get_hover_text(&self, nid: usize, content: impl AsRef<[u8]>) -> Vec<MarkedString> {
         let mut results = vec![];
         let root = self.tree.root_node();

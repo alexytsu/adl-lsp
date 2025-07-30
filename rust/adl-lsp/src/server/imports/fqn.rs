@@ -12,7 +12,18 @@ impl Fqn {
         }
     }
 
-    pub fn module_path(&self) -> Vec<&str> {
+    /// Returns the module path parts as a vector of strings
+    /// e.g. "adlc.package" -> ["adlc", "package"]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use adl_lsp::server::imports::Fqn;
+    ///
+    /// let fqn = Fqn::from_module_name_and_type_name("adlc.package", "AdlPackage");
+    /// assert_eq!(fqn.module_path_parts(), vec!["adlc", "package"]);   
+    /// ```
+    pub fn module_path_parts(&self) -> Vec<&str> {
         self.module_name.split(".").collect()
     }
 }
