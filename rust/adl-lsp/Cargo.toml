@@ -1,6 +1,6 @@
 [package]
 name = "adl-lsp"
-version = "0.7.2"
+version = "0.8.0"
 edition = "2024"
 description = "Language Server Protocol implementation for ADL"
 license = "MIT"
@@ -17,10 +17,10 @@ tower = "0.5.2"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 tree-sitter = "0.25.6"
-tree-sitter-adl = { version = "0.6.0" }
+tree-sitter-adl = { version = "0.6.1" }
 
 # useful for local development
-# tree-sitter-adl = { version = "0.6.0", path = "../../../tree-sitter-adl" }
+# tree-sitter-adl = { version = "0.6.1", path = "../../../tree-sitter-adl" }
 
 
 [dev-dependencies]
