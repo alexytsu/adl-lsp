@@ -62,6 +62,132 @@ impl ImportsCache {
             .collect()
     }
 
+    /// Get all available FQNs for completion suggestions
+    pub fn get_all_fqns(&self) -> Vec<Fqn> {
+        self.definition_locations
+            .read()
+            .expect("poisoned")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// Get completion suggestions for import statements based on the current text prefix
+    /// Returns a tuple of (module_suggestions, type_suggestions)
+    pub fn get_import_completions(&self, prefix: &str) -> (Vec<String>, Vec<Fqn>) {
+        let all_fqns = self.get_all_fqns();
+        
+        // Parse the prefix to understand what the user is typing
+        let trimmed_prefix = prefix.trim();
+        
+        // Remove "import " if present to get just the module/type part
+        let import_part = if trimmed_prefix.starts_with("import ") {
+            &trimmed_prefix[7..].trim()
+        } else {
+            trimmed_prefix
+        };
+        
+        if import_part.is_empty() {
+            // Return all top-level modules
+            return self.get_all_modules();
+        }
+        
+        let parts: Vec<&str> = import_part.split('.').collect();
+        
+        if import_part.ends_with('.') {
+            // User just typed a dot, suggest next level modules or types
+            let prefix_parts = &parts[..parts.len()-1]; // Remove empty last part
+            self.get_completions_after_prefix(prefix_parts, &all_fqns)
+        } else {
+            // User is in the middle of typing, suggest matching completions
+            let (complete_parts, partial_part) = parts.split_at(parts.len().saturating_sub(1));
+            let partial = partial_part.get(0).map_or("", |v| *v);
+            
+            self.get_partial_completions(complete_parts, partial, &all_fqns)
+        }
+    }
+
+    /// Get all unique module names
+    fn get_all_modules(&self) -> (Vec<String>, Vec<Fqn>) {
+        let all_fqns = self.get_all_fqns();
+        let mut modules = std::collections::HashSet::new();
+        
+        for fqn in &all_fqns {
+            let module_parts = fqn.module_path_parts();
+            if !module_parts.is_empty() {
+                modules.insert(module_parts[0].to_string());
+            }
+        }
+        
+        let mut module_list: Vec<String> = modules.into_iter().collect();
+        module_list.sort();
+        
+        (module_list, vec![])
+    }
+
+    /// Get completions after a complete prefix (e.g., user typed "adlc.")
+    fn get_completions_after_prefix(&self, prefix_parts: &[&str], all_fqns: &[Fqn]) -> (Vec<String>, Vec<Fqn>) {
+        let mut modules = std::collections::HashSet::new();
+        let mut types = Vec::new();
+        
+        for fqn in all_fqns {
+            if fqn.module_matches_prefix(prefix_parts) {
+                // Check if this is an exact module match (suggest types)
+                if fqn.module_path_parts() == prefix_parts {
+                    types.push(fqn.clone());
+                }
+                // Or if there's a next module part (suggest modules)
+                else if let Some(next_part) = fqn.next_module_part_after_prefix(prefix_parts) {
+                    modules.insert(next_part.to_string());
+                }
+            }
+        }
+        
+        let mut module_list: Vec<String> = modules.into_iter().collect();
+        module_list.sort();
+        types.sort_by(|a, b| a.type_name().cmp(b.type_name()));
+        
+        (module_list, types)
+    }
+
+    /// Get completions when user is partially typing (e.g., user typed "adl" or "adlc.pack")
+    fn get_partial_completions(&self, complete_parts: &[&str], partial: &str, all_fqns: &[Fqn]) -> (Vec<String>, Vec<Fqn>) {
+        let mut modules = std::collections::HashSet::new();
+        let mut types = Vec::new();
+        
+        for fqn in all_fqns {
+            if fqn.module_matches_prefix(complete_parts) {
+                let module_parts = fqn.module_path_parts();
+                
+                // Check if we're matching at the current level
+                if module_parts.len() > complete_parts.len() {
+                    let current_part = module_parts[complete_parts.len()];
+                    if current_part.starts_with(partial) {
+                        // If this matches exactly the current level, could be types too
+                        if module_parts.len() == complete_parts.len() + 1 && current_part == partial {
+                            // Check if this module has types
+                            if module_parts == fqn.module_path_parts() {
+                                types.push(fqn.clone());
+                            }
+                        }
+                        modules.insert(current_part.to_string());
+                    }
+                }
+                
+                // Also check if we're partially typing a type name
+                if fqn.module_path_parts() == complete_parts && fqn.type_name().starts_with(partial) {
+                    types.push(fqn.clone());
+                }
+            }
+        }
+        
+        let mut module_list: Vec<String> = modules.into_iter().collect();
+        module_list.sort();
+        types.sort_by(|a, b| a.type_name().cmp(b.type_name()));
+        
+        (module_list, types)
+    }
+
     /// Add a validated import to the table, registering its import and definition
     fn register_import(&self, source_uri: &Url, fqn: &Fqn, target_uri: &Url) {
         let mut definition_locations = self.definition_locations.write().expect("poisoned");

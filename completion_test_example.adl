@@ -1,0 +1,28 @@
+module example.test;
+
+// Example scenarios where completion would be triggered:
+
+// Scenario 1: Basic module completion
+// Type: "import " -> suggests all available top-level modules
+import 
+
+// Scenario 2: Sub-module completion  
+// Type: "import adlc." -> suggests sub-modules within adlc
+import adlc.
+
+// Scenario 3: Type completion
+// Type: "import adlc.package." -> suggests types within adlc.package
+import adlc.package.
+
+// Scenario 4: Partial matching
+// Type: "import sys" -> suggests modules starting with "sys"
+import sys
+
+// Scenario 5: Complete import (no completion needed)
+import adlc.package.AdlPackage;
+
+// The completion system provides:
+// - Real-time suggestions as you type
+// - Context-aware filtering based on the current prefix
+// - Both module and type suggestions with appropriate icons
+// - Documentation showing full qualified names

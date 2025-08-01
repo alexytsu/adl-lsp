@@ -163,4 +163,9 @@ impl AdlLanguageServerState {
     pub fn get_cached_document_symbols(&self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
         self.symbols.read().expect("poisoned").get(uri).cloned()
     }
+
+    /// Get access to the imports cache for completion and other operations
+    pub fn get_imports_cache(&self) -> &ImportsCache {
+        self.import_manager.cache()
+    }
 }
