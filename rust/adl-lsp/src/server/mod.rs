@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use async_lsp::router::Router;
 use async_lsp::{ClientSocket, Error, ErrorCode, ResponseError};
 use lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionList, CompletionParams, CompletionResponse,
     DiagnosticOptions, DiagnosticServerCapabilities, DidChangeConfigurationParams,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReport,
@@ -17,7 +18,7 @@ use lsp_types::{
     RelatedFullDocumentDiagnosticReport, SaveOptions, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
     WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
-    WorkspaceServerCapabilities,
+    WorkspaceServerCapabilities, CompletionOptions,
 };
 use lsp_types::{notification, request};
 use tracing::{debug, error, info, trace, warn};
@@ -83,6 +84,10 @@ impl From<Server> for Router<Server> {
             .request::<request::DocumentSymbolRequest, _>(|st, params| {
                 let mut st = st.clone();
                 async move { st.handle_document_symbol_request(params) }
+            })
+            .request::<request::Completion, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_completion_request(params) }
             })
             .notification::<notification::DidOpenTextDocument>(|st, params| {
                 trace!("did open text document: {:?}", params);
@@ -417,6 +422,13 @@ impl Server {
                     },
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec![".".to_string()]),
+                    all_commit_characters: None,
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                    completion_item: None,
+                }),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: None,
                     file_operations: Some(WorkspaceFileOperationsServerCapabilities {
@@ -764,6 +776,90 @@ impl Server {
             Ok(None)
         } else {
             Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+        }
+    }
+
+    pub fn handle_completion_request(
+        &mut self,
+        params: CompletionParams,
+    ) -> Result<Option<CompletionResponse>, ResponseError> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        // Get the document content
+        let Some((_tree, content)) = self.get_or_parse_document_with_content(&uri) else {
+            return Ok(None);
+        };
+
+        // Convert position to byte offset
+        let content_str = content.as_str();
+
+        let mut _byte_offset = 0;
+        let mut current_line = 0;
+        let mut current_col = 0;
+
+        for (i, ch) in content_str.char_indices() {
+            if current_line == position.line && current_col == position.character {
+                _byte_offset = i;
+                break;
+            }
+            if ch == '\n' {
+                current_line += 1;
+                current_col = 0;
+            } else {
+                current_col += 1;
+            }
+        }
+
+        // Find the current line text up to the cursor position
+        let lines: Vec<&str> = content_str.lines().collect();
+        let current_line_text = lines.get(position.line as usize).unwrap_or(&"");
+        let text_before_cursor = &current_line_text[..position.character.min(current_line_text.len() as u32) as usize];
+
+        // Check if we're in an import statement
+        if !text_before_cursor.trim_start().starts_with("import") {
+            return Ok(None);
+        }
+
+        // Get completion suggestions from the imports cache
+        let imports_cache = self.state.get_imports_cache();
+        let (module_suggestions, type_suggestions) = imports_cache.get_import_completions(text_before_cursor);
+
+        let mut completion_items = Vec::new();
+
+        // Add module suggestions
+        for module in module_suggestions {
+            completion_items.push(CompletionItem {
+                label: module.clone(),
+                kind: Some(CompletionItemKind::MODULE),
+                detail: Some("Module".to_string()),
+                insert_text: Some(module),
+                ..Default::default()
+            });
+        }
+
+        // Add type suggestions
+        for fqn in type_suggestions {
+            completion_items.push(CompletionItem {
+                label: fqn.type_name().to_string(),
+                kind: Some(CompletionItemKind::CLASS),
+                detail: Some(format!("Type from {}", fqn.module_name())),
+                insert_text: Some(fqn.type_name().to_string()),
+                documentation: Some(lsp_types::Documentation::String(format!(
+                    "Fully qualified name: {}",
+                    fqn.full_name()
+                ))),
+                ..Default::default()
+            });
+        }
+
+        if completion_items.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(CompletionResponse::List(CompletionList {
+                is_incomplete: false,
+                items: completion_items,
+            })))
         }
     }
 }
