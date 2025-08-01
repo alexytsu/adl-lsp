@@ -14,9 +14,9 @@ use lsp_types::{
     FileOperationRegistrationOptions, FullDocumentDiagnosticReport, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, Location, OneOf, ReferenceParams,
-    RelatedFullDocumentDiagnosticReport, SaveOptions, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
-    WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
+    RelatedFullDocumentDiagnosticReport, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url,
+    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceFileOperationsServerCapabilities,
     WorkspaceServerCapabilities,
 };
 use lsp_types::{notification, request};
@@ -75,6 +75,10 @@ impl From<Server> for Router<Server> {
             .request::<request::References, _>(|st, params| {
                 let mut st = st.clone();
                 async move { st.handle_find_references(params) }
+            })
+            .request::<request::Rename, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_rename_request(params) }
             })
             .request::<request::DocumentDiagnosticRequest, _>(|st, params| {
                 let mut st = st.clone();
@@ -404,6 +408,7 @@ impl Server {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
                     DiagnosticOptions {
                         inter_file_dependencies: true,
@@ -620,6 +625,109 @@ impl Server {
             }
             None => Ok(None),
         }
+    }
+
+    pub fn handle_rename_request(
+        &mut self,
+        params: RenameParams,
+    ) -> Result<Option<WorkspaceEdit>, ResponseError> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        let Some((tree, contents)) = self.get_or_parse_document_with_content(&uri) else {
+            return Ok(None);
+        };
+
+        let contents = contents.as_bytes();
+        let Some((identifier, node)) = tree.get_identifier_at(&position, contents) else {
+            return Ok(None);
+        };
+
+        if !NodeKind::can_be_referenced(&node) {
+            return Ok(None);
+        }
+
+        debug!("performing rename for identifier: {} -> {}", identifier, new_name);
+
+        let mut all_references = Vec::new();
+
+        // First, find references in the current file
+        let local_references = tree.find_references(identifier, contents);
+        all_references.extend(local_references);
+
+        let module_name = tree.find_module_name(contents).ok_or_else(|| {
+            error!("could not get module name for document: {}", uri);
+            ResponseError::new(ErrorCode::INTERNAL_ERROR, "could not get module name")
+        })?;
+
+        // Then, find all files that import this identifier
+        let importing_files =
+            self.state
+                .get_files_importing_type(&Fqn::from_module_name_and_type_name(
+                    module_name,
+                    identifier,
+                ));
+        debug!(
+            "found {} files importing identifier '{}'",
+            importing_files.len(),
+            identifier
+        );
+
+        // Parse each importing file and find references
+        for importing_file_uri in importing_files {
+            if importing_file_uri == uri {
+                // Skip the current file, already processed above
+                continue;
+            }
+
+            debug!(
+                "checking for references in importing file: {}",
+                importing_file_uri
+            );
+
+            // Get or parse the importing file
+            if let Some(importing_tree) = self.get_or_parse_document(&importing_file_uri) {
+                if let Some(importing_content) =
+                    self.state.get_document_content(&importing_file_uri)
+                {
+                    let imported_references =
+                        importing_tree.find_references(identifier, importing_content.as_bytes());
+                    all_references.extend(imported_references);
+                }
+            }
+        }
+
+        // Also include the definition if it's in the current file
+        let definition_location = tree.definition(identifier, contents);
+        if let Some(DefinitionLocation::Resolved(location)) = definition_location {
+            all_references.push(location);
+        }
+
+        debug!("Total references found for rename: {}", all_references.len());
+
+        if all_references.is_empty() {
+            return Ok(None);
+        }
+
+        // Convert locations to text edits
+        let mut changes = std::collections::HashMap::new();
+        for location in all_references {
+            let text_edit = TextEdit {
+                range: location.range,
+                new_text: new_name.clone(),
+            };
+            
+            changes.entry(location.uri).or_insert_with(Vec::new).push(text_edit);
+        }
+
+        let workspace_edit = WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        };
+
+        Ok(Some(workspace_edit))
     }
 
     pub fn handle_find_references(
