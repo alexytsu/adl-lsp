@@ -13,7 +13,7 @@ use lsp_types::{
     FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
     FileOperationRegistrationOptions, FullDocumentDiagnosticReport, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, OneOf, ReferenceParams,
+    InitializeParams, InitializeResult, Location, OneOf, Position, Range, ReferenceParams,
     RelatedFullDocumentDiagnosticReport, SaveOptions, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
     WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
@@ -573,6 +573,13 @@ impl Server {
         };
 
         let content = content.as_bytes();
+        
+        // First check if we're navigating to a module
+        if let Some((module_path, source_module)) = tree.get_module_path_at(&position, content) {
+            return self.handle_module_navigation(&module_path, &source_module, &uri);
+        }
+        
+        // Fall back to the original identifier-based navigation
         let Some((identifier, node)) = tree.get_identifier_at(&position, content) else {
             return Ok(None);
         };
@@ -619,6 +626,45 @@ impl Server {
                 Ok(resolved_import.map(GotoDefinitionResponse::Scalar))
             }
             None => Ok(None),
+        }
+    }
+
+    /// Handle navigation to a module file
+    fn handle_module_navigation(
+        &self,
+        module_path: &str,
+        source_module: &str,
+        source_uri: &Url,
+    ) -> Result<Option<GotoDefinitionResponse>, ResponseError> {
+        debug!("attempting to navigate to module: {}", module_path);
+        
+        let (_, search_dirs) = self.discover_adl_files();
+        let module_path_parts: Vec<&str> = module_path.split('.').collect();
+        
+        // Use the existing resolve_import function to find the module file
+        let target_uri = packages::resolve_import(
+            &search_dirs,
+            source_uri,
+            source_module,
+            &module_path_parts,
+            &|path| std::fs::metadata(path).is_ok(),
+        );
+        
+        match target_uri {
+            Some(uri) => {
+                debug!("found module file: {}", uri.path());
+                Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri,
+                    range: Range {
+                        start: Position { line: 0, character: 0 },
+                        end: Position { line: 0, character: 0 },
+                    },
+                })))
+            }
+            None => {
+                debug!("could not resolve module: {}", module_path);
+                Ok(None)
+            }
         }
     }
 
