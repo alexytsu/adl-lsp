@@ -5,6 +5,11 @@ on:
     tags:
       - 'adl-lsp-*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag (e.g., adl-lsp-0.8.3)'
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,10 +35,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.85.1
+        uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: 1.85.1
           targets: ${{ matrix.target }}
 
       - name: Install target
@@ -70,7 +78,7 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/adl-lsp-')
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     
@@ -81,26 +89,43 @@ jobs:
       - name: Extract version from tag
         id: extract_version
         run: |
-          # Extract version from tag (e.g., adl-lsp-0.8.2 -> 0.8.2)
-          VERSION=${GITHUB_REF#refs/tags/adl-lsp-}
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Extract version from git tag (e.g., adl-lsp-0.8.2 -> 0.8.2)
+            VERSION=${GITHUB_REF#refs/tags/adl-lsp-}
+          else
+            # Use version from workflow_dispatch input
+            VERSION=${{ github.event.inputs.release_tag }}
+            # Remove the adl-lsp- prefix if it exists
+            VERSION=${VERSION#adl-lsp-}
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracted version: $VERSION"
+          echo "Full input: ${{ github.event.inputs.release_tag }}"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
+      - name: List downloaded artifacts
+        run: |
+          echo "Contents of artifacts directory:"
+          ls -la artifacts/
+          echo "Contents of each artifact subdirectory:"
+          for dir in artifacts/*/; do
+            if [ -d "$dir" ]; then
+              echo "--- $dir ---"
+              ls -la "$dir"
+            fi
+          done
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.release_tag }}
           name: "adl-lsp ${{ steps.extract_version.outputs.version }}"
-          files: |
-            artifacts/adl-lsp-linux-x64
-            artifacts/adl-lsp-macos-x64
-            artifacts/adl-lsp-macos-arm64
-          generate_release_notes: true
+          files: artifacts/**/*
+          generate_release_notes: false
           draft: false
           prerelease: false
         env:
