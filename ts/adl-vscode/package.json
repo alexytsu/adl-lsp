@@ -20,7 +20,7 @@
       "properties": {
         "adl.lspPath": {
           "type": "string",
-          "default": "~/.cargo/bin/adl-lsp",
+          "default": "adl-lsp",
           "description": "Path to the ADL server executable."
         },
         "adl.searchDirs": {
@@ -44,7 +44,9 @@
           ".adl-hs",
           ".adl-java",
           ".adl-rs",
-          ".adl-ts"
+          ".adl-ts",
+          ".adl-pg",
+          ".adl-py"
         ],
         "aliases": [
           "ADL",
