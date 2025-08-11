@@ -26,16 +26,19 @@ Further planned features
 ## Requirements
 
 You will need to install [adl-lsp](https://github.com/alexytsu/adl-lsp) and have
-it on your path. The easiest way to do this is `cargo install adl-lsp`.
+it on your path. See the
+[README](https://github.com/alexytsu/adl-lsp?tab=readme-ov-file#installation)
+for instructions to install.
 
 ## Extension Settings
 
 This extension contributes the following settings:
 
-- `adl.lspPath`: If you ran `cargo install adl-lsp` set this to
-  "~/.cargo/bin/adl-lsp"
-- `adl.searchDirs`: ADL package locations. An ADL package is the directory
-  that contains top-level ADL modules.
+- `adl.lspPath`: If the `adl-lsp` is not available on your default path, specify
+  its location here.
+- `adl.searchDirs`: ADL package locations. An ADL package is the directory that
+  contains top-level ADL modules and may contain an `adl-package.json` file that
+  specifies dependencies.
 
 ## Publishing checklist
 
