@@ -75,7 +75,7 @@ jobs:
         include:
         - build: macos-x86
           os: macos-latest
-          rust: stable
+          rust: nightly
           target: x86_64-apple-darwin
         - build: macos-arm
           os: macos-latest
@@ -85,24 +85,25 @@ jobs:
           os: ubuntu-latest
           rust: stable
           target: x86_64-unknown-linux-gnu
-        - build: linux-arm
-          os: ubuntu-latest
-          rust: stable
-          target: aarch64-unknown-linux-gnu
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ matrix.rust }}
-        target: ${{ matrix.target }}
-
-    - name: Show target information
+    - name: Build release binary
       shell: bash
       run: |
+        # Install Rust toolchain with target
+        rustup toolchain install ${{ matrix.rust }} --target ${{ matrix.target }}
+        rustup default ${{ matrix.rust }}
+        
+        # Verify target is available
+        if ! rustup target list --installed | grep -q "${{ matrix.target }}"; then
+          echo "Target ${{ matrix.target }} not installed, installing now..."
+          rustup target add ${{ matrix.target }}
+        fi
+        
+        # Show debugging info
         echo "Matrix target: ${{ matrix.target }}"
         echo "Matrix os: ${{ matrix.os }}"
         echo "Matrix build: ${{ matrix.build }}"
@@ -110,22 +111,8 @@ jobs:
         rustup default
         echo "Installed targets:"
         rustup target list --installed
-        echo "Target ${{ matrix.target }} status:"
-        rustup target list | grep "${{ matrix.target }}" || echo "Target not found in available list"
-
-    - name: Ensure target is available
-      shell: bash
-      run: |
-        if ! rustup target list --installed | grep -q "${{ matrix.target }}"; then
-          echo "Target ${{ matrix.target }} not installed, installing now..."
-          rustup target add ${{ matrix.target }}
-        else
-          echo "Target ${{ matrix.target }} is already installed"
-        fi
-
-    - name: Build release binary
-      shell: bash
-      run: |
+        
+        # Build the binary
         cd rust/adl-lsp
         cargo build --verbose --release --target ${{ matrix.target }}
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
