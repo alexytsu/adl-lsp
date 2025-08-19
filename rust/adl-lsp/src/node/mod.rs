@@ -505,4 +505,3 @@ impl<'a> AdlAnnotationDeclaration<'a> {
         last_child && cursor.node().kind() != ";"
     }
 }
-

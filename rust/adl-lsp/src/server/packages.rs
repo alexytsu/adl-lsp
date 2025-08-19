@@ -77,7 +77,6 @@ pub fn resolve_import(
         imported_module_path,
     );
 
-
     // Check if the source package is in other package roots
     for (package_root, adl_files) in search_dirs {
         let target_path = package_root.join(format!("{}.adl", imported_module_path.join("/")));
@@ -115,7 +114,10 @@ pub fn resolve_import(
             }
         }
         if document_exists(&target_path) {
-            error!("found target path: {} on disk but wasn't found in the search_dir cache", target_path.display());
+            error!(
+                "found target path: {} on disk but wasn't found in the search_dir cache",
+                target_path.display()
+            );
             return Some(Url::from_file_path(&target_path).expect("invalid file path"));
         }
     }
@@ -202,7 +204,10 @@ mod tests {
 
     #[test]
     fn test_rooted_deep_in_workspace() {
-        let search_dirs = HashMap::from([(PathBuf::from("/project/a/b/c/d/e/f/g/adl"), HashSet::from([]))]);
+        let search_dirs = HashMap::from([(
+            PathBuf::from("/project/a/b/c/d/e/f/g/adl"),
+            HashSet::from([]),
+        )]);
         let source_uri =
             Url::parse("file:///project/a/b/c/d/e/f/g/adl/a/b/c/d/e/f/g/module.adl").unwrap();
         let resolved = resolve_import(

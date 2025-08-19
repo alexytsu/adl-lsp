@@ -61,7 +61,10 @@ impl AdlLanguageServerState {
         let package_root = packages::find_package_root_by_marker(uri.path());
         if let Some(package_root) = package_root {
             adl_file_to_package_root.insert(uri.clone(), package_root.clone());
-            package_root_to_adl_files.entry(package_root).or_default().insert(uri.clone());
+            package_root_to_adl_files
+                .entry(package_root)
+                .or_default()
+                .insert(uri.clone());
         }
 
         // pass closure allowing import_manager to recursively `resolve_and_register_imports`

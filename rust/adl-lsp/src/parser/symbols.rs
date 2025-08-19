@@ -216,6 +216,6 @@ mod test {
             assert_eq!(newtype_symbol.detail, Some("String".to_string()));
         });
     }
-    
+
     // TODO(low): add an insta snapshot test
 }
