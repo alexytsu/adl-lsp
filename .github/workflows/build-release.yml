@@ -1,16 +1,10 @@
 name: release
 
-# Only do the release on adl-lsp-x.y.z tags or manual workflow dispatch.
+# Only do the release on adl-lsp-x.y.z tags
 on:
   push:
     tags:
     - "adl-lsp-[0-9]+.[0-9]+.[0-9]+"
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: 'Release tag (e.g., adl-lsp-0.8.3) or version (e.g., 0.8.3)'
-        required: true
-        type: string
 
 # We need this to be able to create releases.
 permissions:
@@ -25,18 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Get the release version from the tag or workflow dispatch
+      - name: Get the release version from the tag
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # Extract version from git tag (e.g., adl-lsp-0.8.2 -> 0.8.2)
-            VERSION=${GITHUB_REF#refs/tags/adl-lsp-}
-          else
-            # Use version from workflow_dispatch input
-            INPUT_VERSION="${{ github.event.inputs.release_tag }}"
-            # Remove the adl-lsp- prefix if it exists
-            VERSION=${INPUT_VERSION#adl-lsp-}
-          fi
+          # Extract version from git tag (e.g., adl-lsp-0.8.2 -> 0.8.2)
+          VERSION=${GITHUB_REF#refs/tags/adl-lsp-}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "Extracted version: $VERSION"
       - name: Show the version
@@ -53,14 +40,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            gh release create $VERSION --draft --verify-tag --title $VERSION
-          else
-            gh release create "adl-lsp-$VERSION" --draft --title "adl-lsp $VERSION"
-          fi
+          gh release create $VERSION --draft --title $VERSION
     outputs:
       version: ${{ env.VERSION }}
-      release_tag: ${{ github.event_name == 'push' && env.VERSION || format('adl-lsp-{0}', env.VERSION) }}
+      release_tag: ${{ env.VERSION }}
 
   build-release:
     name: build-release
