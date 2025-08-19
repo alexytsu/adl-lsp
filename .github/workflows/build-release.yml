@@ -94,21 +94,18 @@ jobs:
       shell: bash
       run: |
         # Install Rust toolchain with target
-        rustup toolchain install ${{ matrix.rust }} --target ${{ matrix.target }}
-        rustup default ${{ matrix.rust }}
+        rustup toolchain install ${{ matrix.rust }} --profile minimal --target ${{ matrix.target }}
+        rustup override set ${{ matrix.rust }}
         
-        # Verify target is available
-        if ! rustup target list --installed | grep -q "${{ matrix.target }}"; then
-          echo "Target ${{ matrix.target }} not installed, installing now..."
-          rustup target add ${{ matrix.target }}
-        fi
+        # Add the target explicitly (needed for cross-compilation)
+        rustup target add ${{ matrix.target }}
         
         # Show debugging info
         echo "Matrix target: ${{ matrix.target }}"
         echo "Matrix os: ${{ matrix.os }}"
         echo "Matrix build: ${{ matrix.build }}"
         echo "Current rustup default:"
-        rustup default
+        rustup show
         echo "Installed targets:"
         rustup target list --installed
         
