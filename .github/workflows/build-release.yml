@@ -94,11 +94,11 @@ jobs:
       shell: bash
       run: |
         # Install Rust toolchain with target
-        rustup toolchain install ${{ matrix.rust }} --profile minimal --target ${{ matrix.target }}
+        rustup toolchain install ${{ matrix.rust }} --profile minimal
         rustup override set ${{ matrix.rust }}
         
         # Add the target explicitly (needed for cross-compilation)
-        rustup target add ${{ matrix.target }}
+        rustup target add ${{ matrix.target }} --toolchain ${{ matrix.rust }}
         
         # Show debugging info
         echo "Matrix target: ${{ matrix.target }}"
@@ -109,9 +109,9 @@ jobs:
         echo "Installed targets:"
         rustup target list --installed
         
-        # Build the binary
+        # Build the binary using the explicit toolchain
         cd rust/adl-lsp
-        cargo build --verbose --release --target ${{ matrix.target }}
+        cargo +${{ matrix.rust }} build --verbose --release --target ${{ matrix.target }}
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
           bin="target/${{ matrix.target }}/release/adl-lsp.exe"
         else
