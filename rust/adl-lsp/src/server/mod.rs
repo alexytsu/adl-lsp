@@ -6,17 +6,18 @@ use std::sync::{Arc, Mutex};
 use async_lsp::router::Router;
 use async_lsp::{ClientSocket, Error, ErrorCode, ResponseError};
 use lsp_types::{
-    DiagnosticOptions, DiagnosticServerCapabilities, DidChangeConfigurationParams,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReport,
-    DocumentDiagnosticReportResult, DocumentSymbolParams, DocumentSymbolResponse,
-    FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
+    CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
+    CompletionResponse, DiagnosticOptions, DiagnosticServerCapabilities,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
+    DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentSymbolParams,
+    DocumentSymbolResponse, FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
     FileOperationRegistrationOptions, FullDocumentDiagnosticReport, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, OneOf, ReferenceParams,
-    RelatedFullDocumentDiagnosticReport, SaveOptions, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
-    WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
+    InitializeParams, InitializeResult, Location, OneOf, Position, Range, ReferenceParams,
+    RelatedFullDocumentDiagnosticReport, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url,
+    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceFileOperationsServerCapabilities,
     WorkspaceServerCapabilities,
 };
 use lsp_types::{notification, request};
@@ -76,6 +77,10 @@ impl From<Server> for Router<Server> {
                 let mut st = st.clone();
                 async move { st.handle_find_references(params) }
             })
+            .request::<request::Rename, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_rename_request(params) }
+            })
             .request::<request::DocumentDiagnosticRequest, _>(|st, params| {
                 let mut st = st.clone();
                 async move { st.handle_document_diagnostic_request(params) }
@@ -83,6 +88,10 @@ impl From<Server> for Router<Server> {
             .request::<request::DocumentSymbolRequest, _>(|st, params| {
                 let mut st = st.clone();
                 async move { st.handle_document_symbol_request(params) }
+            })
+            .request::<request::Completion, _>(|st, params| {
+                let mut st = st.clone();
+                async move { st.handle_completion_request(params) }
             })
             .notification::<notification::DidOpenTextDocument>(|st, params| {
                 trace!("did open text document: {:?}", params);
@@ -404,6 +413,7 @@ impl Server {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
                     DiagnosticOptions {
                         inter_file_dependencies: true,
@@ -417,6 +427,13 @@ impl Server {
                     },
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec![".".to_string()]),
+                    all_commit_characters: None,
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                    completion_item: None,
+                }),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: None,
                     file_operations: Some(WorkspaceFileOperationsServerCapabilities {
@@ -573,6 +590,13 @@ impl Server {
         };
 
         let content = content.as_bytes();
+
+        // First check if we're navigating to a module
+        if let Some((module_path, source_module)) = tree.get_module_path_at(&position, content) {
+            return self.handle_module_navigation(&module_path, &source_module, &uri);
+        }
+
+        // Fall back to the original identifier-based navigation
         let Some((identifier, node)) = tree.get_identifier_at(&position, content) else {
             return Ok(None);
         };
@@ -620,6 +644,148 @@ impl Server {
             }
             None => Ok(None),
         }
+    }
+
+    /// Handle navigation to a module file
+    fn handle_module_navigation(
+        &self,
+        module_path: &str,
+        source_module: &str,
+        source_uri: &Url,
+    ) -> Result<Option<GotoDefinitionResponse>, ResponseError> {
+        debug!("attempting to navigate to module: {}", module_path);
+
+        let (_, search_dirs) = self.discover_adl_files();
+        let module_path_parts: Vec<&str> = module_path.split('.').collect();
+
+        // Use the existing resolve_import function to find the module file
+        let target_uri = packages::resolve_import(
+            &search_dirs,
+            source_uri,
+            source_module,
+            &module_path_parts,
+            &|path| std::fs::metadata(path).is_ok(),
+        );
+
+        match target_uri {
+            Some(uri) => {
+                debug!("found module file: {}", uri.path());
+                Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri,
+                    range: Range {
+                        start: Position { line: 0, character: 0 },
+                        end: Position { line: 0, character: 0 },
+                    },
+                })))
+            }
+            None => {
+                debug!("could not resolve module: {}", module_path);
+                Ok(None)
+            }
+        }
+    }
+
+    pub fn handle_rename_request(
+        &mut self,
+        params: RenameParams,
+    ) -> Result<Option<WorkspaceEdit>, ResponseError> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        let Some((tree, contents)) = self.get_or_parse_document_with_content(&uri) else {
+            return Ok(None);
+        };
+
+        let contents = contents.as_bytes();
+        let Some((identifier, node)) = tree.get_identifier_at(&position, contents) else {
+            return Ok(None);
+        };
+
+        if !NodeKind::can_be_referenced(&node) {
+            return Ok(None);
+        }
+
+        debug!("performing rename for identifier: {} -> {}", identifier, new_name);
+
+        let mut all_references = Vec::new();
+
+        // First, find references in the current file
+        let local_references = tree.find_references(identifier, contents);
+        all_references.extend(local_references);
+
+        let module_name = tree.find_module_name(contents).ok_or_else(|| {
+            error!("could not get module name for document: {}", uri);
+            ResponseError::new(ErrorCode::INTERNAL_ERROR, "could not get module name")
+        })?;
+
+        // Then, find all files that import this identifier
+        let importing_files =
+            self.state
+                .get_files_importing_type(&Fqn::from_module_name_and_type_name(
+                    module_name,
+                    identifier,
+                ));
+        debug!(
+            "found {} files importing identifier '{}'",
+            importing_files.len(),
+            identifier
+        );
+
+        // Parse each importing file and find references
+        for importing_file_uri in importing_files {
+            if importing_file_uri == uri {
+                // Skip the current file, already processed above
+                continue;
+            }
+
+            debug!(
+                "checking for references in importing file: {}",
+                importing_file_uri
+            );
+
+            // Get or parse the importing file
+            if let Some(importing_tree) = self.get_or_parse_document(&importing_file_uri) {
+                if let Some(importing_content) =
+                    self.state.get_document_content(&importing_file_uri)
+                {
+                    let imported_references =
+                        importing_tree.find_references(identifier, importing_content.as_bytes());
+                    all_references.extend(imported_references);
+                }
+            }
+        }
+
+        // Also include the definition if it's in the current file
+        let definition_location = tree.definition(identifier, contents);
+        if let Some(DefinitionLocation::Resolved(location)) = definition_location {
+            all_references.push(location);
+        }
+
+        debug!("Total references found for rename: {}", all_references.len());
+
+        if all_references.is_empty() {
+            return Ok(None);
+        }
+
+        // Convert locations to text edits
+        let mut changes = std::collections::HashMap::new();
+        for location in all_references {
+            let text_edit = TextEdit {
+                range: location.range,
+                new_text: new_name.clone(),
+            };
+
+            changes.entry(location.uri).or_insert_with(Vec::new).push(text_edit);
+        }
+
+        let workspace_edit = WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        };
+
+        Ok(Some(workspace_edit))
     }
 
     pub fn handle_find_references(
@@ -764,6 +930,90 @@ impl Server {
             Ok(None)
         } else {
             Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+        }
+    }
+
+    pub fn handle_completion_request(
+        &mut self,
+        params: CompletionParams,
+    ) -> Result<Option<CompletionResponse>, ResponseError> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        // Get the document content
+        let Some((_tree, content)) = self.get_or_parse_document_with_content(&uri) else {
+            return Ok(None);
+        };
+
+        // Convert position to byte offset
+        let content_str = content.as_str();
+
+        let mut _byte_offset = 0;
+        let mut current_line = 0;
+        let mut current_col = 0;
+
+        for (i, ch) in content_str.char_indices() {
+            if current_line == position.line && current_col == position.character {
+                _byte_offset = i;
+                break;
+            }
+            if ch == '\n' {
+                current_line += 1;
+                current_col = 0;
+            } else {
+                current_col += 1;
+            }
+        }
+
+        // Find the current line text up to the cursor position
+        let lines: Vec<&str> = content_str.lines().collect();
+        let current_line_text = lines.get(position.line as usize).unwrap_or(&"");
+        let text_before_cursor = &current_line_text[..position.character.min(current_line_text.len() as u32) as usize];
+
+        // Check if we're in an import statement
+        if !text_before_cursor.trim_start().starts_with("import") {
+            return Ok(None);
+        }
+
+        // Get completion suggestions from the imports cache
+        let imports_cache = self.state.get_imports_cache();
+        let (module_suggestions, type_suggestions) = imports_cache.get_import_completions(text_before_cursor);
+
+        let mut completion_items = Vec::new();
+
+        // Add module suggestions
+        for module in module_suggestions {
+            completion_items.push(CompletionItem {
+                label: module.clone(),
+                kind: Some(CompletionItemKind::MODULE),
+                detail: Some("Module".to_string()),
+                insert_text: Some(module),
+                ..Default::default()
+            });
+        }
+
+        // Add type suggestions
+        for fqn in type_suggestions {
+            completion_items.push(CompletionItem {
+                label: fqn.type_name().to_string(),
+                kind: Some(CompletionItemKind::CLASS),
+                detail: Some(format!("Type from {}", fqn.module_name())),
+                insert_text: Some(fqn.type_name().to_string()),
+                documentation: Some(lsp_types::Documentation::String(format!(
+                    "Fully qualified name: {}",
+                    fqn.full_name()
+                ))),
+                ..Default::default()
+            });
+        }
+
+        if completion_items.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(CompletionResponse::List(CompletionList {
+                is_incomplete: false,
+                items: completion_items,
+            })))
         }
     }
 }
