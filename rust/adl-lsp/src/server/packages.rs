@@ -26,7 +26,7 @@ pub fn find_package_root_by_marker<T: AsRef<Path>>(path: T) -> Option<PathBuf> {
 /// Resolve a dependency path, handling both relative and absolute paths
 pub fn resolve_dependency_path<T: AsRef<Path>>(package_root: T, localdir: &str) -> PathBuf {
     // Check if it's an absolute path
-    if localdir.starts_with('/') {
+    if Path::new(localdir).is_absolute() {
         PathBuf::from(localdir)
     } else {
         // Treat as relative path from package root
@@ -68,8 +68,8 @@ pub fn resolve_import(
     // TODO(med): don't need these parameters if we trust fully in the search dirs being passed in
     source_uri: &Url,
     source_module: &str,
-    imported_module_path: &Vec<&str>,
-    document_exists: &impl Fn(&PathBuf) -> bool, // assuming that if a .adl file exists here, it is valid
+    imported_module_path: &[&str],
+    document_exists: &impl Fn(&Path) -> bool, // assuming that if a .adl file exists here, it is valid
 ) -> Option<Url> {
     trace!(
         "resolving import: source={:?}, imported_module_path={:?}",
@@ -139,7 +139,7 @@ mod tests {
             &search_dirs,
             &source_uri,
             "common.main",
-            &vec!["common", "strings"],
+            &["common", "strings"],
             &|_| true,
         );
         assert_eq!(
@@ -158,7 +158,7 @@ mod tests {
             &search_dirs,
             &source_uri,
             "common.main",
-            &vec!["common", "strings"],
+            &["common", "strings"],
             &|_| true,
         );
         assert_eq!(
@@ -176,7 +176,7 @@ mod tests {
             &search_dirs,
             &source_uri,
             "common.main",
-            &vec!["app", "main"],
+            &["app", "main"],
             &|_| true,
         );
         assert_eq!(
@@ -193,7 +193,7 @@ mod tests {
             &search_dirs,
             &source_uri,
             "a.b.c.d.e.f.g.module",
-            &vec!["a", "b", "c", "d", "e", "ff", "gg", "hh", "ii", "module"],
+            &["a", "b", "c", "d", "e", "ff", "gg", "hh", "ii", "module"],
             &|_| true,
         );
         assert_eq!(
@@ -214,7 +214,7 @@ mod tests {
             &search_dirs,
             &source_uri,
             "a.b.c.d.e.f.g.module",
-            &vec!["a", "b", "c", "d", "e", "ff", "gg", "hh", "ii", "module"],
+            &["a", "b", "c", "d", "e", "ff", "gg", "hh", "ii", "module"],
             &|_| true,
         );
         assert_eq!(
@@ -238,7 +238,7 @@ mod tests {
             &search_dirs,
             &source_uri,
             "common.main",
-            &vec!["common", "strings"],
+            &["common", "strings"],
             &|path| path.starts_with("/project/adl-strings"),
         );
         assert_eq!(

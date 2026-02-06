@@ -57,12 +57,6 @@ impl<'a> AdlModuleDefinition<'a> {
         };
         scoped_name.utf8_text(content).expect("utf-8 parse error")
     }
-
-    pub fn is_missing_semicolon(&self) -> bool {
-        let mut cursor = self.node.walk();
-        let last_child = cursor.goto_last_child();
-        last_child && cursor.node().kind() != ";"
-    }
 }
 
 /// An import declaration appears at the top of a module and can either be a fully qualified name or a star-import.
@@ -138,16 +132,6 @@ impl<'a> AdlImportDeclaration<'a> {
                 .last(),
             AdlImportDeclaration::StarImport(_) => None,
         }
-    }
-
-    pub fn is_missing_semicolon(&self) -> bool {
-        let node = match self {
-            AdlImportDeclaration::FullyQualified(scoped_name) => &scoped_name.node,
-            AdlImportDeclaration::StarImport(scoped_name) => &scoped_name.node,
-        };
-        let mut cursor = node.walk();
-        let last_child = cursor.goto_last_child();
-        last_child && cursor.node().kind() != ";"
     }
 }
 
@@ -286,11 +270,13 @@ impl<'a> AdlModuleBody<'a> {
 ///     optional(";")
 ///   )
 /// ```
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AdlTypeDefinition<'a> {
     node: Node<'a>,
 }
 
+#[allow(dead_code)]
 impl<'a> AdlTypeDefinition<'a> {
     pub fn try_new(node: Node<'a>) -> Option<Self> {
         if NodeKind::is_type_definition(&node) {
@@ -327,11 +313,13 @@ impl<'a> AdlTypeDefinition<'a> {
 ///     optional(";")
 ///   )
 /// ```
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AdlNewtypeDefinition<'a> {
     node: Node<'a>,
 }
 
+#[allow(dead_code)]
 impl<'a> AdlNewtypeDefinition<'a> {
     pub fn try_new(node: Node<'a>) -> Option<Self> {
         if NodeKind::is_newtype_definition(&node) {
@@ -366,11 +354,13 @@ impl<'a> AdlNewtypeDefinition<'a> {
 ///     optional(";")
 ///   )
 /// ```
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AdlStructDefinition<'a> {
     node: Node<'a>,
 }
 
+#[allow(dead_code)]
 impl<'a> AdlStructDefinition<'a> {
     pub fn try_new(node: Node<'a>) -> Option<Self> {
         if NodeKind::is_struct_definition(&node) {
@@ -405,11 +395,13 @@ impl<'a> AdlStructDefinition<'a> {
 ///     optional(";")
 ///   )
 /// ```
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AdlUnionDefinition<'a> {
     node: Node<'a>,
 }
 
+#[allow(dead_code)]
 impl<'a> AdlUnionDefinition<'a> {
     pub fn try_new(node: Node<'a>) -> Option<Self> {
         if NodeKind::is_union_definition(&node) {
@@ -443,11 +435,13 @@ impl<'a> AdlUnionDefinition<'a> {
 ///     optional(";")
 ///   )
 /// ```
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AdlField<'a> {
     node: Node<'a>,
 }
 
+#[allow(dead_code)]
 impl<'a> AdlField<'a> {
     pub fn try_new(node: Node<'a>) -> Option<Self> {
         if NodeKind::is_field(&node) {
@@ -481,11 +475,13 @@ impl<'a> AdlField<'a> {
 ///     optional(";")
 ///   )
 /// ```
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AdlAnnotationDeclaration<'a> {
     node: Node<'a>,
 }
 
+#[allow(dead_code)]
 impl<'a> AdlAnnotationDeclaration<'a> {
     pub fn try_new(node: Node<'a>) -> Option<Self> {
         if NodeKind::is_annotation_declaration(&node) {

@@ -13,7 +13,12 @@ pub trait References {
 impl References for ParsedTree {
     fn find_references(&self, identifier: &str, content: impl AsRef<[u8]>) -> Vec<Location> {
         let mut results = vec![];
-        self.find_references_impl(identifier, self.tree.root_node(), &mut results, content);
+        self.find_references_impl(
+            identifier,
+            self.tree.root_node(),
+            &mut results,
+            content.as_ref(),
+        );
         results
     }
 }
@@ -24,67 +29,60 @@ impl ParsedTree {
         identifier: &str,
         n: Node,
         v: &mut Vec<Location>,
-        content: impl AsRef<[u8]>,
+        content: &[u8],
     ) {
         if identifier.is_empty() {
             return;
         }
 
-        // Find all user-defined names in the tree
-        let all_user_defined_names = self.find_all_nodes_from(n, NodeKind::is_user_defined_name);
-
-        let matching_names: Vec<_> = all_user_defined_names
+        let locations = self
+            .find_all_nodes_from(n, NodeKind::is_user_defined_name)
             .into_iter()
-            .filter(|n| n.utf8_text(content.as_ref()).expect("utf-8 parse error") == identifier)
-            .collect();
+            .filter_map(|node| {
+                let text = node.utf8_text(content).ok()?;
+                if text != identifier {
+                    return None;
+                }
 
-        let filtered_names: Vec<_> = matching_names
-            .into_iter()
-            .filter(|n| {
                 // Include all usages except definitions and imports
-                let is_from_definition = Self::is_from_definition(n);
-                let is_from_import = Self::is_from_import_declaration(n).0;
-                !is_from_definition && !is_from_import
-            })
-            .collect();
+                if Self::is_from_definition(&node) || Self::find_import_declaration(&node).is_some()
+                {
+                    return None;
+                }
 
-        let deduped_names: Vec<_> = filtered_names
-            .into_iter()
-            .filter(|n| {
                 // Prefer scoped_name over identifier when they have the same position
-                // This avoids duplicates from scoped_name containing identifier
-                // TODO(med): investigate this further. is this is a hack? i think we can probably just ignore identifiers
-                let should_include = if NodeKind::is_scoped_name(n) {
-                    true
-                } else if NodeKind::is_identifier(n) {
-                    // Only include identifier if it's not a direct child of scoped_name with same text
-                    if let Some(parent) = n.parent() {
-                        let is_child_of_scoped_name = NodeKind::is_scoped_name(&parent)
-                            && parent.utf8_text(content.as_ref()).unwrap_or("") == identifier;
-                        !is_child_of_scoped_name
-                    } else {
-                        true
-                    }
-                } else {
-                    true
-                };
+                if !Self::should_include_reference(&node, identifier, content) {
+                    return None;
+                }
 
-                should_include
+                Some(Location {
+                    uri: self.uri.clone(),
+                    range: Range {
+                        start: ts_lsp_interop::ts_to_lsp_position(&node.start_position()),
+                        end: ts_lsp_interop::ts_to_lsp_position(&node.end_position()),
+                    },
+                })
             })
-            .collect();
-
-        let locations: Vec<Location> = deduped_names
-            .into_iter()
-            .map(|n| Location {
-                uri: self.uri.clone(),
-                range: Range {
-                    start: ts_lsp_interop::ts_to_lsp_position(&n.start_position()),
-                    end: ts_lsp_interop::ts_to_lsp_position(&n.end_position()),
-                },
-            })
-            .collect();
+            .collect::<Vec<_>>();
 
         v.extend(locations);
+    }
+
+    fn should_include_reference(node: &Node<'_>, identifier: &str, content: &[u8]) -> bool {
+        // TODO(med): investigate this further. is this is a hack? i think we can probably just ignore identifiers
+        if NodeKind::is_scoped_name(node) {
+            return true;
+        }
+
+        if NodeKind::is_identifier(node) {
+            if let Some(parent) = node.parent() {
+                let is_child_of_scoped_name = NodeKind::is_scoped_name(&parent)
+                    && parent.utf8_text(content).unwrap_or("") == identifier;
+                return !is_child_of_scoped_name;
+            }
+        }
+
+        true
     }
 }
 

@@ -16,8 +16,8 @@ use lsp_types::{
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, Location, OneOf, Position, Range, ReferenceParams,
     RelatedFullDocumentDiagnosticReport, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url,
-    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceFileOperationsServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+    Url, WorkDoneProgressOptions, WorkspaceEdit, WorkspaceFileOperationsServerCapabilities,
     WorkspaceServerCapabilities,
 };
 use lsp_types::{notification, request};
@@ -663,7 +663,7 @@ impl Server {
             &search_dirs,
             source_uri,
             source_module,
-            &module_path_parts,
+            module_path_parts.as_slice(),
             &|path| std::fs::metadata(path).is_ok(),
         );
 
@@ -673,8 +673,14 @@ impl Server {
                 Ok(Some(GotoDefinitionResponse::Scalar(Location {
                     uri,
                     range: Range {
-                        start: Position { line: 0, character: 0 },
-                        end: Position { line: 0, character: 0 },
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 0,
+                            character: 0,
+                        },
                     },
                 })))
             }
@@ -706,7 +712,10 @@ impl Server {
             return Ok(None);
         }
 
-        debug!("performing rename for identifier: {} -> {}", identifier, new_name);
+        debug!(
+            "performing rename for identifier: {} -> {}",
+            identifier, new_name
+        );
 
         let mut all_references = Vec::new();
 
@@ -762,7 +771,10 @@ impl Server {
             all_references.push(location);
         }
 
-        debug!("Total references found for rename: {}", all_references.len());
+        debug!(
+            "Total references found for rename: {}",
+            all_references.len()
+        );
 
         if all_references.is_empty() {
             return Ok(None);
@@ -776,7 +788,10 @@ impl Server {
                 new_text: new_name.clone(),
             };
 
-            changes.entry(location.uri).or_insert_with(Vec::new).push(text_edit);
+            changes
+                .entry(location.uri)
+                .or_insert_with(Vec::new)
+                .push(text_edit);
         }
 
         let workspace_edit = WorkspaceEdit {
@@ -968,7 +983,8 @@ impl Server {
         // Find the current line text up to the cursor position
         let lines: Vec<&str> = content_str.lines().collect();
         let current_line_text = lines.get(position.line as usize).unwrap_or(&"");
-        let text_before_cursor = &current_line_text[..position.character.min(current_line_text.len() as u32) as usize];
+        let text_before_cursor =
+            &current_line_text[..position.character.min(current_line_text.len() as u32) as usize];
 
         // Check if we're in an import statement
         if !text_before_cursor.trim_start().starts_with("import") {
@@ -977,7 +993,8 @@ impl Server {
 
         // Get completion suggestions from the imports cache
         let imports_cache = self.state.get_imports_cache();
-        let (module_suggestions, type_suggestions) = imports_cache.get_import_completions(text_before_cursor);
+        let (module_suggestions, type_suggestions) =
+            imports_cache.get_import_completions(text_before_cursor);
 
         let mut completion_items = Vec::new();
 

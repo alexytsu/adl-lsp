@@ -1,10 +1,8 @@
 use async_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 use tracing::debug;
+use tree_sitter::Node;
 
-use crate::node::{
-    AdlAnnotationDeclaration, AdlField, AdlImportDeclaration, AdlModuleBody, AdlModuleDefinition,
-    AdlNewtypeDefinition, AdlStructDefinition, AdlTypeDefinition, AdlUnionDefinition, NodeKind,
-};
+use crate::node::{AdlModuleBody, NodeKind};
 use crate::parser::tree::Tree;
 use crate::parser::ts_lsp_interop::ts_to_lsp_position;
 
@@ -29,9 +27,7 @@ impl ParsedTree {
         if let Some(import_diagnostics) = self.collect_import_diagnostics() {
             diagnostics.extend(import_diagnostics);
         }
-        if let Some(missing_semicolon_diagnostics) = self.collect_missing_semicolon_diagnostics() {
-            diagnostics.extend(missing_semicolon_diagnostics);
-        }
+        diagnostics.extend(self.collect_missing_semicolon_diagnostics());
 
         debug!("collected diagnostics: {:?}", diagnostics);
         diagnostics
@@ -76,12 +72,9 @@ impl ParsedTree {
         );
     }
 
-    pub fn collect_missing_semicolon_diagnostics(&self) -> Option<Vec<Diagnostic>> {
-        // TODO(alex): abstract this over all nodes with potentially-missing semicolon
-        let mut diagnostics = Vec::new();
-
+    pub fn collect_missing_semicolon_diagnostics(&self) -> Vec<Diagnostic> {
         // Helper function to create diagnostic for missing semicolon
-        let create_missing_semicolon_diagnostic = |n: tree_sitter::Node| Diagnostic {
+        let create_missing_semicolon_diagnostic = |n: Node| Diagnostic {
             range: Range {
                 start: ts_to_lsp_position(&n.start_position()),
                 end: ts_to_lsp_position(&n.end_position()),
@@ -91,103 +84,26 @@ impl ParsedTree {
             ..Default::default()
         };
 
-        // Check module definitions
-        diagnostics.extend(
-            self.find_all_nodes(NodeKind::is_module_definition)
-                .into_iter()
-                .filter(|n| {
-                    AdlModuleDefinition::try_new(*n)
-                        .map(|t| t.is_missing_semicolon())
-                        .unwrap_or(false)
-                })
-                .map(create_missing_semicolon_diagnostic),
-        );
+        let node_kinds: &[fn(&Node) -> bool] = &[
+            NodeKind::is_module_definition,
+            NodeKind::is_import_declaration,
+            NodeKind::is_type_definition,
+            NodeKind::is_newtype_definition,
+            NodeKind::is_struct_definition,
+            NodeKind::is_union_definition,
+            NodeKind::is_field,
+            NodeKind::is_annotation_declaration,
+        ];
 
-        // Check import declarations
-        diagnostics.extend(
-            self.find_all_nodes(NodeKind::is_import_declaration)
-                .into_iter()
-                .filter(|n| {
-                    AdlImportDeclaration::try_new(*n)
-                        .map(|t| t.is_missing_semicolon())
-                        .unwrap_or(false)
-                })
-                .map(create_missing_semicolon_diagnostic),
-        );
-
-        // Check type definitions
-        diagnostics.extend(
-            self.find_all_nodes(NodeKind::is_type_definition)
-                .into_iter()
-                .filter(|n| {
-                    AdlTypeDefinition::try_new(*n)
-                        .map(|t| t.is_missing_semicolon())
-                        .unwrap_or(false)
-                })
-                .map(create_missing_semicolon_diagnostic),
-        );
-
-        // Check newtype definitions
-        diagnostics.extend(
-            self.find_all_nodes(NodeKind::is_newtype_definition)
-                .into_iter()
-                .filter(|n| {
-                    AdlNewtypeDefinition::try_new(*n)
-                        .map(|t| t.is_missing_semicolon())
-                        .unwrap_or(false)
-                })
-                .map(create_missing_semicolon_diagnostic),
-        );
-
-        // Check struct definitions
-        diagnostics.extend(
-            self.find_all_nodes(NodeKind::is_struct_definition)
-                .into_iter()
-                .filter(|n| {
-                    AdlStructDefinition::try_new(*n)
-                        .map(|t| t.is_missing_semicolon())
-                        .unwrap_or(false)
-                })
-                .map(create_missing_semicolon_diagnostic),
-        );
-
-        // Check union definitions
-        diagnostics.extend(
-            self.find_all_nodes(NodeKind::is_union_definition)
-                .into_iter()
-                .filter(|n| {
-                    AdlUnionDefinition::try_new(*n)
-                        .map(|t| t.is_missing_semicolon())
-                        .unwrap_or(false)
-                })
-                .map(create_missing_semicolon_diagnostic),
-        );
-
-        // Check fields
-        diagnostics.extend(
-            self.find_all_nodes(NodeKind::is_field)
-                .into_iter()
-                .filter(|n| {
-                    AdlField::try_new(*n)
-                        .map(|t| t.is_missing_semicolon())
-                        .unwrap_or(false)
-                })
-                .map(create_missing_semicolon_diagnostic),
-        );
-
-        // Check annotation declarations
-        diagnostics.extend(
-            self.find_all_nodes(NodeKind::is_annotation_declaration)
-                .into_iter()
-                .filter(|n| {
-                    AdlAnnotationDeclaration::try_new(*n)
-                        .map(|t| t.is_missing_semicolon())
-                        .unwrap_or(false)
-                })
-                .map(create_missing_semicolon_diagnostic),
-        );
-
-        Some(diagnostics)
+        node_kinds
+            .iter()
+            .flat_map(|predicate| {
+                self.find_all_nodes(*predicate)
+                    .into_iter()
+                    .filter(|n| is_missing_semicolon(*n))
+                    .map(create_missing_semicolon_diagnostic)
+            })
+            .collect()
     }
 
     pub fn collect_import_diagnostics(&self) -> Option<Vec<Diagnostic>> {
@@ -239,6 +155,12 @@ impl ParsedTree {
     }
 }
 
+fn is_missing_semicolon(node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    let last_child = cursor.goto_last_child();
+    last_child && cursor.node().kind() != ";"
+}
+
 #[cfg(test)]
 mod test {
     use async_lsp::lsp_types::Url;
@@ -274,5 +196,16 @@ mod test {
         let parsed = AdlParser::new().parse(url.clone(), contents);
         assert!(parsed.is_some());
         assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics(contents));
+    }
+
+    #[test]
+    fn test_collect_missing_semicolon_no_error() {
+        let url: Url = "file://foo/message.adl".parse().unwrap();
+        let contents = include_str!("input/message.adl");
+
+        let parsed = AdlParser::new().parse(url.clone(), contents);
+        assert!(parsed.is_some());
+        let diagnostics = parsed.unwrap().collect_missing_semicolon_diagnostics();
+        assert!(diagnostics.is_empty());
     }
 }

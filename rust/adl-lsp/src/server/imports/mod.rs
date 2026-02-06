@@ -96,7 +96,7 @@ impl ImportsCache {
 
         if import_part.ends_with('.') {
             // User just typed a dot, suggest next level modules or types
-            let prefix_parts = &parts[..parts.len()-1]; // Remove empty last part
+            let prefix_parts = &parts[..parts.len() - 1]; // Remove empty last part
             self.get_completions_after_prefix(prefix_parts, &all_fqns)
         } else {
             // User is in the middle of typing, suggest matching completions
@@ -126,7 +126,11 @@ impl ImportsCache {
     }
 
     /// Get completions after a complete prefix (e.g., user typed "adlc.")
-    fn get_completions_after_prefix(&self, prefix_parts: &[&str], all_fqns: &[Fqn]) -> (Vec<String>, Vec<Fqn>) {
+    fn get_completions_after_prefix(
+        &self,
+        prefix_parts: &[&str],
+        all_fqns: &[Fqn],
+    ) -> (Vec<String>, Vec<Fqn>) {
         let mut modules = std::collections::HashSet::new();
         let mut types = Vec::new();
 
@@ -151,7 +155,12 @@ impl ImportsCache {
     }
 
     /// Get completions when user is partially typing (e.g., user typed "adl" or "adlc.pack")
-    fn get_partial_completions(&self, complete_parts: &[&str], partial: &str, all_fqns: &[Fqn]) -> (Vec<String>, Vec<Fqn>) {
+    fn get_partial_completions(
+        &self,
+        complete_parts: &[&str],
+        partial: &str,
+        all_fqns: &[Fqn],
+    ) -> (Vec<String>, Vec<Fqn>) {
         let mut modules = std::collections::HashSet::new();
         let mut types = Vec::new();
 
@@ -164,7 +173,8 @@ impl ImportsCache {
                     let current_part = module_parts[complete_parts.len()];
                     if current_part.starts_with(partial) {
                         // If this matches exactly the current level, could be types too
-                        if module_parts.len() == complete_parts.len() + 1 && current_part == partial {
+                        if module_parts.len() == complete_parts.len() + 1 && current_part == partial
+                        {
                             // Check if this module has types
                             if module_parts == fqn.module_path_parts() {
                                 types.push(fqn.clone());
@@ -175,7 +185,8 @@ impl ImportsCache {
                 }
 
                 // Also check if we're partially typing a type name
-                if fqn.module_path_parts() == complete_parts && fqn.type_name().starts_with(partial) {
+                if fqn.module_path_parts() == complete_parts && fqn.type_name().starts_with(partial)
+                {
                     types.push(fqn.clone());
                 }
             }
@@ -356,7 +367,7 @@ impl ImportsCache {
                 self.resolve_fully_qualified_import(search_dirs, source_uri, source_module, &fqn);
             }
             AdlImportDeclaration::StarImport(_) => {
-                let imported_module_path =
+                let imported_module_path: Vec<&str> =
                     import_node.module_name(source_content).split('.').collect();
                 // let imported_module_tree =
                 //     &ParsedTree::get_source_module(import_node.inner(), source_content)
@@ -365,7 +376,7 @@ impl ImportsCache {
                     search_dirs,
                     source_uri,
                     source_module,
-                    &imported_module_path,
+                    imported_module_path.as_slice(),
                     get_or_parse_document_tree,
                 );
             }
@@ -378,7 +389,7 @@ impl ImportsCache {
         search_dirs: &HashMap<PathBuf, HashSet<Url>>,
         source_uri: &Url,
         source_module: &str,
-        imported_module_path: &Vec<&str>,
+        imported_module_path: &[&str],
         get_or_parse_document_tree: &mut impl FnMut(&Url) -> Option<ParsedTree>,
     ) {
         debug!("expanding star import from {:?}", imported_module_path);
@@ -455,11 +466,12 @@ impl ImportsCache {
         debug!("resolving fully-qualified import: {:?}", import);
 
         // Resolve the module paths
+        let module_path_parts = import.module_path_parts();
         let possible_path = packages::resolve_import(
             search_dirs,
             source_uri,
             source_module,
-            &import.module_path_parts(),
+            module_path_parts.as_slice(),
             &|path| fs::exists(path).is_ok_and(|exists| exists),
         );
 

@@ -51,7 +51,8 @@ impl Fqn {
             return false;
         }
 
-        module_parts.iter()
+        module_parts
+            .iter()
             .zip(prefix_parts.iter())
             .all(|(module_part, prefix_part)| module_part == prefix_part)
     }

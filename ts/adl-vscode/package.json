@@ -23,6 +23,11 @@
           "default": "adl-lsp",
           "description": "Path to the ADL server executable."
         },
+        "adl.cargoPath": {
+          "type": "string",
+          "default": "cargo",
+          "description": "Path to the cargo binary used in development mode."
+        },
         "adl.searchDirs": {
           "type": "array",
           "items": {

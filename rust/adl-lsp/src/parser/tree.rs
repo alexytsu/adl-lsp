@@ -140,7 +140,8 @@ impl ParsedTree {
         while let Some(parent) = current.parent() {
             if NodeKind::is_import_declaration(&parent) {
                 if let Some(import_decl) = crate::node::AdlImportDeclaration::try_new(parent) {
-                    let source_module = self.find_module_definition()
+                    let source_module = self
+                        .find_module_definition()
                         .map(|m| m.module_name(content).to_string())
                         .unwrap_or_default();
                     let module_path = import_decl.module_name(content).to_string();
@@ -174,7 +175,9 @@ impl ParsedTree {
 
                     // Calculate relative byte offset within the scoped name text
                     let relative_byte_offset = if cursor_point.row == scoped_start_point.row {
-                        cursor_point.column.saturating_sub(scoped_start_point.column)
+                        cursor_point
+                            .column
+                            .saturating_sub(scoped_start_point.column)
                     } else {
                         // Multi-line case - use the current node's position
                         let node_start = current.start_position();
@@ -188,11 +191,14 @@ impl ParsedTree {
                     // Find which dot-separated segment we're in
                     let mut current_offset = 0;
                     for (i, part) in parts.iter().enumerate() {
-                        if relative_byte_offset >= current_offset && relative_byte_offset < current_offset + part.len() {
+                        if relative_byte_offset >= current_offset
+                            && relative_byte_offset < current_offset + part.len()
+                        {
                             // We're clicking on part i, so the module path is everything before this part
                             if i > 0 {
                                 let module_path = parts[..i].join(".");
-                                let source_module = self.find_module_definition()
+                                let source_module = self
+                                    .find_module_definition()
                                     .map(|m| m.module_name(content).to_string())
                                     .unwrap_or_default();
                                 return Some((module_path, source_module));
@@ -211,8 +217,8 @@ impl ParsedTree {
 
 #[cfg(test)]
 mod tests {
-    use async_lsp::lsp_types::{Position, Url};
     use crate::parser::AdlParser;
+    use async_lsp::lsp_types::{Position, Url};
 
     #[test]
     fn test_get_module_path_from_import() {
@@ -231,7 +237,10 @@ mod tests {
 
         // Test clicking on "common.db" in "import common.db.User;"
         // Position on line 1 (0-indexed), character 11 (pointing to "common.db")
-        let position = Position { line: 1, character: 15 }; // Points to "db" in "common.db"
+        let position = Position {
+            line: 1,
+            character: 15,
+        }; // Points to "db" in "common.db"
         let result = tree.get_module_path_at(&position, contents.as_bytes());
 
         if let Some((module_path, source_module)) = result {
@@ -256,7 +265,10 @@ mod tests {
 
         // Test clicking on "common" in "common.string.StringNE"
         // Position on line 2 (0-indexed), character 8 (pointing to "common")
-        let position = Position { line: 2, character: 8 }; // Points to "common"
+        let position = Position {
+            line: 2,
+            character: 8,
+        }; // Points to "common"
         let result = tree.get_module_path_at(&position, contents.as_bytes());
 
         if let Some((_module_path, source_module)) = result {
@@ -267,7 +279,10 @@ mod tests {
         }
 
         // Test clicking on "string" in "common.string.StringNE"
-        let position = Position { line: 2, character: 15 }; // Points to "string"
+        let position = Position {
+            line: 2,
+            character: 15,
+        }; // Points to "string"
         let result = tree.get_module_path_at(&position, contents.as_bytes());
 
         if let Some((module_path, source_module)) = result {
@@ -293,7 +308,10 @@ mod tests {
         let tree = parser.parse(uri, contents.as_bytes()).unwrap();
 
         // Test clicking on "other.module" in "import other.module.*;"
-        let position = Position { line: 1, character: 15 }; // Points to "module" in "other.module"
+        let position = Position {
+            line: 1,
+            character: 15,
+        }; // Points to "module" in "other.module"
         let result = tree.get_module_path_at(&position, contents.as_bytes());
 
         if let Some((module_path, source_module)) = result {

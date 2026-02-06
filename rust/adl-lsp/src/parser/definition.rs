@@ -38,27 +38,35 @@ impl Definition for ParsedTree {
         identifier: &str,
         content: impl AsRef<[u8]>,
     ) -> Option<DefinitionLocation> {
-        self.definition_impl(identifier, self.tree.root_node(), content)
+        self.definition_impl(identifier, self.tree.root_node(), content.as_ref())
     }
 }
 
 // TODO(med): handle goto field for annotations
 impl ParsedTree {
     pub fn is_from_definition(node: &Node<'_>) -> bool {
-        NodeKind::is_definition(node) || node.parent().is_some_and(|p| Self::is_from_definition(&p))
+        let mut current = *node;
+        loop {
+            if NodeKind::is_definition(&current) {
+                return true;
+            }
+            match current.parent() {
+                Some(parent) => current = parent,
+                None => return false,
+            }
+        }
     }
 
-    pub fn is_from_import_declaration<'a>(
-        node: &Node<'a>,
-    ) -> (bool, Option<AdlImportDeclaration<'a>>) {
-        if NodeKind::is_import_declaration(node) {
-            (
-                true,
-                Some(AdlImportDeclaration::try_new(*node).expect("expected import_declaration")),
-            )
-        } else {
-            node.parent()
-                .map_or((false, None), |p| Self::is_from_import_declaration(&p))
+    pub fn find_import_declaration<'a>(node: &Node<'a>) -> Option<AdlImportDeclaration<'a>> {
+        let mut current = *node;
+        loop {
+            if NodeKind::is_import_declaration(&current) {
+                return AdlImportDeclaration::try_new(current);
+            }
+            match current.parent() {
+                Some(parent) => current = parent,
+                None => return None,
+            }
         }
     }
 
@@ -66,7 +74,7 @@ impl ParsedTree {
         &self,
         identifier: &str,
         n: Node,
-        content: impl AsRef<[u8]>,
+        content: &[u8],
     ) -> Option<DefinitionLocation> {
         if identifier.is_empty() {
             return None;
@@ -75,20 +83,20 @@ impl ParsedTree {
         let mut locations: Vec<DefinitionLocation> = self
             .find_all_nodes_from(n, NodeKind::is_user_defined_name)
             .into_iter()
-            .filter(|n| n.utf8_text(content.as_ref()).expect("utf-8 parse error") == identifier)
+            .filter(|n| n.utf8_text(content).expect("utf-8 parse error") == identifier)
             .filter(|n| {
                 let is_from_definition = Self::is_from_definition(n);
-                let is_from_import = Self::is_from_import_declaration(n).0;
+                let is_from_import = Self::find_import_declaration(n).is_some();
                 is_from_import || (is_from_definition && !NodeKind::is_identifier(n))
             })
             .map(|n| {
-                if let (true, Some(import_node)) = Self::is_from_import_declaration(&n) {
+                if let Some(import_node) = Self::find_import_declaration(&n) {
                     DefinitionKind::Import(import_node, identifier.into())
                 } else {
                     DefinitionKind::Definition(n)
                 }
             })
-            .map(|n| self.definition_location(n, &content))
+            .map(|n| self.definition_location(n, content))
             .collect();
 
         // If no direct matches found, look for the identifier as part of scoped names
@@ -97,22 +105,18 @@ impl ParsedTree {
                 .find_all_nodes_from(n, NodeKind::is_scoped_name)
                 .into_iter()
                 .filter(|scoped_node| {
-                    let scoped_text = scoped_node
-                        .utf8_text(content.as_ref())
-                        .expect("utf-8 parse error");
+                    let scoped_text = scoped_node.utf8_text(content).expect("utf-8 parse error");
                     // Check if the scoped name ends with our identifier (e.g., "common.string.StringNE" ends with "StringNE")
                     scoped_text.ends_with(&format!(".{}", identifier)) || scoped_text == identifier
                 })
                 .map(|scoped_node| {
                     // For scoped names, we treat them as imports that need to be resolved
-                    let scoped_text = scoped_node
-                        .utf8_text(content.as_ref())
-                        .expect("utf-8 parse error");
+                    let scoped_text = scoped_node.utf8_text(content).expect("utf-8 parse error");
                     let parts: Vec<&str> = scoped_text.split('.').collect();
                     if parts.len() > 1 {
                         // Create an unresolved import for the scoped name
                         DefinitionLocation::Import(UnresolvedImport {
-                            source_module: Self::get_source_module(&scoped_node, &content)
+                            source_module: Self::get_source_module(&scoped_node, content)
                                 .unwrap_or_default(),
                             target_module_path: parts[..parts.len() - 1]
                                 .iter()
@@ -141,14 +145,10 @@ impl ParsedTree {
         locations.first().cloned()
     }
 
-    fn definition_location(
-        &self,
-        d: DefinitionKind,
-        content: impl AsRef<[u8]>,
-    ) -> DefinitionLocation {
+    fn definition_location(&self, d: DefinitionKind, content: &[u8]) -> DefinitionLocation {
         match d {
             DefinitionKind::Definition(n) => {
-                debug!("definition: {:?}", n.utf8_text(content.as_ref()));
+                debug!("definition: {:?}", n.utf8_text(content));
                 DefinitionLocation::Resolved(Location {
                     uri: self.uri.clone(),
                     range: Range {
@@ -160,11 +160,11 @@ impl ParsedTree {
             DefinitionKind::Import(import_declaration, identifier) => {
                 DefinitionLocation::Import(UnresolvedImport {
                     source_module: self
-                        .find_module_name(content.as_ref())
-                        .expect("expected module name")
+                        .find_module_name(content)
+                        .unwrap_or_default()
                         .to_string(),
                     target_module_path: import_declaration
-                        .module_name(content.as_ref())
+                        .module_name(content)
                         .split(".")
                         .map(|s| s.to_string())
                         .collect(),
@@ -174,11 +174,11 @@ impl ParsedTree {
         }
     }
 
-    pub fn get_source_module(node: &Node<'_>, content: impl AsRef<[u8]>) -> Option<String> {
+    pub fn get_source_module(node: &Node<'_>, content: &[u8]) -> Option<String> {
         if NodeKind::is_module_definition(node) {
             return node
                 .child(1)
-                .and_then(|child| child.utf8_text(content.as_ref()).ok())
+                .and_then(|child| child.utf8_text(content).ok())
                 .map(String::from);
         }
         node.parent()

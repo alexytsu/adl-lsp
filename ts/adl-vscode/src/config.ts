@@ -1,6 +1,7 @@
 import v from "vscode";
 import path from "path";
 import os from "os";
+import fs from "fs";
 import { Executable } from "vscode-languageclient/node";
 
 /**
@@ -37,30 +38,84 @@ export function getSearchDirs(): string[] {
   });
 }
 
-export function getLspPath(): string {
-  let adlLspPath: string =
-    v.workspace.getConfiguration("adl").get("lspPath") ?? "adl-lsp";
-
+function expandHomePath(input: string): string {
   if (
-    adlLspPath.startsWith("~") ||
-    adlLspPath.startsWith("${userHome}") ||
-    adlLspPath.startsWith("$HOME")
+    input.startsWith("~") ||
+    input.startsWith("${userHome}") ||
+    input.startsWith("$HOME")
   ) {
     // HACK path substitution
-    adlLspPath = adlLspPath.replace("~", os.homedir());
-    adlLspPath = adlLspPath.replace("${userHome}", os.homedir());
-    adlLspPath = adlLspPath.replace("$HOME", os.homedir());
+    return input
+      .replace("~", os.homedir())
+      .replace("${userHome}", os.homedir())
+      .replace("$HOME", os.homedir());
   }
 
-  return adlLspPath;
+  return input;
 }
 
-export function getLspExecutable(): {
+export function getLspPath(): string {
+  const adlLspPath: string =
+    v.workspace.getConfiguration("adl").get("lspPath") ?? "adl-lsp";
+  return expandHomePath(adlLspPath);
+}
+
+function getCargoPath(): string {
+  const configured = v.workspace
+    .getConfiguration("adl")
+    .get<string>("cargoPath");
+  if (configured && configured.trim().length > 0) {
+    return expandHomePath(configured);
+  }
+
+  const envCargo = process.env.CARGO;
+  if (envCargo && fs.existsSync(envCargo)) {
+    return envCargo;
+  }
+
+  const candidates = [
+    path.join(os.homedir(), ".cargo", "bin", "cargo"),
+    path.join(os.homedir(), ".local", "share", "cargo", "bin", "cargo"),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "cargo";
+}
+
+function findDevCwd(extensionPath?: string): string | undefined {
+  const candidates: string[] = [];
+
+  if (extensionPath) {
+    candidates.push(path.resolve(extensionPath, "..", "..", "rust", "adl-lsp"));
+  }
+
+  const workspaceRoot = v.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (workspaceRoot) {
+    candidates.push(path.join(workspaceRoot, "rust", "adl-lsp"));
+  }
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, "Cargo.toml"))) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+export function getLspExecutable(extensionPath?: string): {
   dev: Executable;
   prod: Executable;
 } {
   const adlSearchDirs = getSearchDirs();
   const adlLspPath = getLspPath();
+  const cargoPath = getCargoPath();
+  const devCwd = findDevCwd(extensionPath);
 
   const adlLspArgs = [
     "--client",
@@ -71,11 +126,9 @@ export function getLspExecutable(): {
 
   return {
     dev: {
-      command: "cargo",
+      command: cargoPath,
       args: ["run", "--bin", "adl-lsp", "--", ...adlLspArgs],
-      options: {
-        cwd: "/Users/alexytsu/Develop/Repositories/adl-lang/adl-lsp/rust/adl-lsp",
-      },
+      ...(devCwd ? { options: { cwd: devCwd } } : {}),
     },
     prod: {
       command: adlLspPath,

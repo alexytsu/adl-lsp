@@ -13,18 +13,17 @@ let client: LanguageClient;
 
 export async function activate(context: v.ExtensionContext) {
   console.log("ADL Language Server is starting...");
-
-  const { dev, prod } = getLspExecutable();
-
-  const serverOptions: ServerOptions = {
-    run: prod,
-    debug: prod,
-  };
+  const { dev, prod } = getLspExecutable(context.extensionPath);
 
   // const serverOptions: ServerOptions = {
-  //   run: dev,
-  //   debug: dev,
+  //   run: prod,
+  //   debug: prod,
   // };
+
+  const serverOptions: ServerOptions = {
+    run: dev,
+    debug: dev,
+  };
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "adl" }],
@@ -34,7 +33,7 @@ export async function activate(context: v.ExtensionContext) {
     "adl-vscode",
     "ADL Language Server",
     serverOptions,
-    clientOptions
+    clientOptions,
   );
 
   v.workspace.onDidChangeConfiguration(async (e) => {
