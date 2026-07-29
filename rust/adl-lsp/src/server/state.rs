@@ -63,9 +63,7 @@ impl AdlLanguageServerState {
         let package_root = packages::find_package_root_by_marker(uri.path()).or_else(|| {
             parsed_tree
                 .find_module_name(contents.as_bytes())
-                .and_then(|module_name| {
-                    packages::package_root_from_module(uri.path(), module_name)
-                })
+                .and_then(|module_name| packages::package_root_from_module(uri.path(), module_name))
         });
         if let Some(package_root) = package_root {
             adl_file_to_package_root.insert(uri.clone(), package_root.clone());

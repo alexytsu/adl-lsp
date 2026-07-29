@@ -28,7 +28,10 @@ pub fn find_package_root_by_marker<T: AsRef<Path>>(path: T) -> Option<PathBuf> {
 /// A module `a.b.c` declared in `<root>/a/b/c.adl` implies the package root is `<root>`, reached by
 /// walking up `module_name.split('.').count()` ancestors from the file. This is a fallback for
 /// workspaces without an `adl-package.json` marker (see [`find_package_root_by_marker`]).
-pub fn package_root_from_module<T: AsRef<Path>>(file_path: T, module_name: &str) -> Option<PathBuf> {
+pub fn package_root_from_module<T: AsRef<Path>>(
+    file_path: T,
+    module_name: &str,
+) -> Option<PathBuf> {
     if module_name.is_empty() {
         return None;
     }
@@ -136,7 +139,10 @@ pub fn resolve_import(
             // Fall back to a filesystem probe. This covers marker-less workspaces where the
             // cache is empty, and files discovered after the initial workspace scan.
             if document_exists(&target_path) {
-                if search_dirs.get(*package_root).is_some_and(|f| !f.is_empty()) {
+                if search_dirs
+                    .get(*package_root)
+                    .is_some_and(|f| !f.is_empty())
+                {
                     error!(
                         "found target path: {} on disk but wasn't found in the search_dir cache",
                         target_path.display()

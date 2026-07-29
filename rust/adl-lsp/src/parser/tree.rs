@@ -317,8 +317,9 @@ impl ParsedTree {
                 // The field's name is its direct `identifier` child (the type_expression comes
                 // before it and is a distinct node kind).
                 let mut field_cursor = field.walk();
-                let Some(name_node) =
-                    field.children(&mut field_cursor).find(NodeKind::is_identifier)
+                let Some(name_node) = field
+                    .children(&mut field_cursor)
+                    .find(NodeKind::is_identifier)
                 else {
                     continue;
                 };
@@ -490,4 +491,3 @@ mod tests {
         );
     }
 }
-

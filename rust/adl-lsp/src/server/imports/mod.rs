@@ -100,11 +100,9 @@ impl ImportsCache {
         let trimmed_prefix = prefix.trim();
 
         // Remove "import " if present to get just the module/type part
-        let import_part = if trimmed_prefix.starts_with("import ") {
-            &trimmed_prefix[7..].trim()
-        } else {
-            trimmed_prefix
-        };
+        let import_part = trimmed_prefix
+            .strip_prefix("import ")
+            .map_or(trimmed_prefix, str::trim);
 
         if import_part.is_empty() {
             // Return all top-level modules
@@ -125,7 +123,7 @@ impl ImportsCache {
         } else {
             // User is in the middle of typing, suggest matching completions
             let (complete_parts, partial_part) = parts.split_at(parts.len().saturating_sub(1));
-            let partial = partial_part.get(0).map_or("", |v| *v);
+            let partial = partial_part.first().map_or("", |v| *v);
 
             debug!(
                 "import completion branch: partial, complete_parts={:?}, partial={:?}",

@@ -17,10 +17,9 @@ use lsp_types::{
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, Location, OneOf, Position, PublishDiagnosticsParams, Range,
     ReferenceParams, RelatedFullDocumentDiagnosticReport, RenameParams, SaveOptions,
-    ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
-    Url, WorkDoneProgressOptions, WorkspaceEdit, WorkspaceFileOperationsServerCapabilities,
-    WorkspaceServerCapabilities,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
+    WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
 };
 use lsp_types::{notification, request};
 use tracing::{debug, error, info, trace, warn};
@@ -444,8 +443,10 @@ impl Server {
                         work_done_progress_options: WorkDoneProgressOptions {
                             work_done_progress: None,
                         },
-                        // TODO(low): enable workspace diagnostics once we have a way to check module positioning
-                        // e.g. module a.b.c must live on disk as ../somepath/a/b/c.adl
+                        // Deferred: enabling workspace diagnostics requires module-position
+                        // validation (module `a.b.c` must live at `<root>/a/b/c.adl`). That
+                        // semantic check is a prerequisite and is intentionally not implemented
+                        // in this pass.
                         workspace_diagnostics: false,
                     },
                 )),
