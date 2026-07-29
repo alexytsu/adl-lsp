@@ -10,5 +10,5 @@ module test.annotations {
     annotation Person::lastName SerializedName "ln";
     annotation Person Doc "a person";
     annotation common.db.User::id Doc "qualified target field";
-    annotation test.annotations Doc "module target";
+    annotation JavaPackage "org.example.annotations";
 };

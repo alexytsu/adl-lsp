@@ -1179,9 +1179,7 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-adl"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "092ea24e56bd3dbd05e0caf1b5306c092739675f80cd73add102549ecb52fbc1"
+version = "0.7.0"
 dependencies = [
  "cc",
  "tree-sitter-language",

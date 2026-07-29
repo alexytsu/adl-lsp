@@ -49,6 +49,19 @@ impl Default for AdlParser {
     }
 }
 
+impl ParsedTree {
+    pub fn find_module_definition(&self) -> Option<AdlModuleDefinition> {
+        self.find_first_node(NodeKind::is_module_definition)
+            .and_then(AdlModuleDefinition::try_new)
+    }
+
+    pub fn find_module_name<'c>(&self, content: &'c [u8]) -> Option<&'c str> {
+        let module_body_node = self.find_first_node(NodeKind::is_module_definition)?;
+        let module_body_node = AdlModuleDefinition::try_new(module_body_node)?;
+        Some(module_body_node.module_name(content))
+    }
+}
+
 /// Conformance: the parser must handle the canonical ADL corpus (adl-lang/adl stdlib and
 /// compiler test inputs) without a single ERROR or MISSING node. The corpus is vendored by
 /// tree-sitter-adl (Workstream A) at `test/canonical/`, reached via the path dependency.
@@ -122,18 +135,5 @@ mod conformance {
             files.len(),
             failures.join("\n")
         );
-    }
-}
-
-impl ParsedTree {
-    pub fn find_module_definition(&self) -> Option<AdlModuleDefinition> {
-        self.find_first_node(NodeKind::is_module_definition)
-            .and_then(AdlModuleDefinition::try_new)
-    }
-
-    pub fn find_module_name<'c>(&self, content: &'c [u8]) -> Option<&'c str> {
-        let module_body_node = self.find_first_node(NodeKind::is_module_definition)?;
-        let module_body_node = AdlModuleDefinition::try_new(module_body_node)?;
-        Some(module_body_node.module_name(content))
     }
 }

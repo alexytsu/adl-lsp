@@ -1,5 +1,29 @@
 ---
 source: src/parser/references.rs
+assertion_line: 120
 expression: string_refs
 ---
-[]
+- uri: "file://input/message.adl"
+  range:
+    start:
+      line: 3
+      character: 16
+    end:
+      line: 3
+      character: 22
+- uri: "file://input/message.adl"
+  range:
+    start:
+      line: 6
+      character: 8
+    end:
+      line: 6
+      character: 14
+- uri: "file://input/message.adl"
+  range:
+    start:
+      line: 7
+      character: 8
+    end:
+      line: 7
+      character: 14

@@ -1,5 +1,6 @@
 ---
 source: src/parser/symbols.rs
+assertion_line: 258
 expression: symbols
 ---
 - name: sample.simple
@@ -14,10 +15,10 @@ expression: symbols
   selectionRange:
     start:
       line: 1
-      character: 12
+      character: 19
     end:
-      line: 16
-      character: 14
+      line: 1
+      character: 32
   children:
     - name: Person
       kind: 23
@@ -31,10 +32,10 @@ expression: symbols
       selectionRange:
         start:
           line: 2
-          character: 16
+          character: 23
         end:
-          line: 5
-          character: 18
+          line: 2
+          character: 29
       children:
         - name: name
           detail: String
@@ -49,11 +50,11 @@ expression: symbols
           selectionRange:
             start:
               line: 3
-              character: 20
+              character: 27
             end:
               line: 3
-              character: 32
-        - name: Int
+              character: 31
+        - name: age
           detail: Int
           kind: 8
           range:
@@ -66,10 +67,10 @@ expression: symbols
           selectionRange:
             start:
               line: 4
-              character: 20
+              character: 24
             end:
               line: 4
-              character: 23
+              character: 27
     - name: Color
       kind: 10
       range:
@@ -82,10 +83,10 @@ expression: symbols
       selectionRange:
         start:
           line: 7
-          character: 16
+          character: 22
         end:
-          line: 11
-          character: 18
+          line: 7
+          character: 27
       children:
         - name: red
           detail: Void
@@ -100,10 +101,10 @@ expression: symbols
           selectionRange:
             start:
               line: 8
-              character: 20
+              character: 25
             end:
               line: 8
-              character: 29
+              character: 28
         - name: green
           detail: Void
           kind: 22
@@ -117,10 +118,10 @@ expression: symbols
           selectionRange:
             start:
               line: 9
-              character: 20
+              character: 25
             end:
               line: 9
-              character: 31
+              character: 30
         - name: blue
           detail: Void
           kind: 22
@@ -134,10 +135,10 @@ expression: symbols
           selectionRange:
             start:
               line: 10
-              character: 20
+              character: 25
             end:
               line: 10
-              character: 30
+              character: 29
     - name: UserId
       detail: Int32
       kind: 5
@@ -151,10 +152,10 @@ expression: symbols
       selectionRange:
         start:
           line: 13
-          character: 16
+          character: 21
         end:
           line: 13
-          character: 36
+          character: 27
     - name: Email
       detail: String
       kind: 5
@@ -168,7 +169,7 @@ expression: symbols
       selectionRange:
         start:
           line: 15
-          character: 16
+          character: 24
         end:
           line: 15
-          character: 39
+          character: 29

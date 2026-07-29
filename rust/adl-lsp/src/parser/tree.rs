@@ -337,7 +337,9 @@ impl ParsedTree {
 
     /// Resolve an annotation field reference at `pos` against types defined in this file only.
     /// Qualified targets (`a.b.Type::field`) return `None`; the server layer resolves those
-    /// through the import table.
+    /// through the import table (see `Server::resolve_annotation_field_definition`, which
+    /// composes `get_annotation_field_reference_at` + `find_field_definition_in_type`).
+    #[cfg(test)]
     pub fn get_annotation_field_definition_at<'a>(
         &'a self,
         pos: &Position,
@@ -390,9 +392,9 @@ mod tests {
     #[test]
     fn test_get_module_path_from_import() {
         let uri: Url = "file://test.adl".parse().unwrap();
-        let contents = r#"module test.module {
+        let contents = r#"module test.sample {
     import common.db.User;
-    import other.module.*;
+    import other.sample.*;
 
     struct MyStruct {
         String name;
@@ -412,7 +414,7 @@ mod tests {
 
         if let Some((module_path, source_module)) = result {
             assert_eq!(module_path, "common.db");
-            assert_eq!(source_module, "test.module");
+            assert_eq!(source_module, "test.sample");
         } else {
             panic!("Expected to find module path in import declaration");
         }
@@ -429,7 +431,7 @@ mod tests {
     #[test]
     fn test_get_module_path_from_scoped_name() {
         let uri: Url = "file://test.adl".parse().unwrap();
-        let contents = r#"module test.module {
+        let contents = r#"module test.sample {
     struct MyStruct {
         common.string.StringNE name;
     };
@@ -450,7 +452,7 @@ mod tests {
             // When clicking on "common" in "common.string.StringNE",
             // we expect to get empty module path since there's nothing before "common"
             // This test might need adjustment based on exact behavior desired
-            assert_eq!(source_module, "test.module");
+            assert_eq!(source_module, "test.sample");
         }
 
         // Test clicking on "string" in "common.string.StringNE"
@@ -462,7 +464,7 @@ mod tests {
 
         if let Some((module_path, source_module)) = result {
             assert_eq!(module_path, "common");
-            assert_eq!(source_module, "test.module");
+            assert_eq!(source_module, "test.sample");
         } else {
             panic!("Expected to find module path in scoped name");
         }
@@ -471,8 +473,8 @@ mod tests {
     #[test]
     fn test_get_module_path_star_import() {
         let uri: Url = "file://test.adl".parse().unwrap();
-        let contents = r#"module test.module {
-    import other.module.*;
+        let contents = r#"module test.sample {
+    import other.sample.*;
 
     struct MyStruct {
         String name;
@@ -482,16 +484,16 @@ mod tests {
         let mut parser = AdlParser::new();
         let tree = parser.parse(uri, contents.as_bytes()).unwrap();
 
-        // Test clicking on "other.module" in "import other.module.*;"
+        // Test clicking on "other.sample" in "import other.sample.*;"
         let position = Position {
             line: 1,
             character: 15,
-        }; // Points to "module" in "other.module"
+        }; // Points to "sample" in "other.sample"
         let result = tree.get_module_path_at(&position, contents.as_bytes());
 
         if let Some((module_path, source_module)) = result {
-            assert_eq!(module_path, "other.module");
-            assert_eq!(source_module, "test.module");
+            assert_eq!(module_path, "other.sample");
+            assert_eq!(source_module, "test.sample");
         } else {
             panic!("Expected to find module path in star import");
         }
@@ -565,7 +567,7 @@ mod tests {
     #[test]
     fn test_annotation_field_goto() {
         let uri: Url = "file://test.adl".parse().unwrap();
-        let contents = r#"module test.module {
+        let contents = r#"module test.sample {
     struct Message {
         String title;
         String body;

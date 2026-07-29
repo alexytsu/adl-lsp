@@ -1,0 +1,226 @@
+---
+source: src/parser/symbols.rs
+assertion_line: 287
+expression: symbols
+---
+- name: test.versioned
+  kind: 2
+  range:
+    start:
+      line: 0
+      character: 0
+    end:
+      line: 22
+      character: 2
+  selectionRange:
+    start:
+      line: 0
+      character: 7
+    end:
+      line: 0
+      character: 21
+  children:
+    - name: "Settings#1"
+      kind: 23
+      range:
+        start:
+          line: 2
+          character: 4
+        end:
+          line: 4
+          character: 6
+      selectionRange:
+        start:
+          line: 2
+          character: 11
+        end:
+          line: 2
+          character: 19
+      children:
+        - name: name
+          detail: String
+          kind: 8
+          range:
+            start:
+              line: 3
+              character: 8
+            end:
+              line: 3
+              character: 20
+          selectionRange:
+            start:
+              line: 3
+              character: 15
+            end:
+              line: 3
+              character: 19
+    - name: "Settings#2"
+      kind: 23
+      range:
+        start:
+          line: 6
+          character: 4
+        end:
+          line: 9
+          character: 6
+      selectionRange:
+        start:
+          line: 6
+          character: 11
+        end:
+          line: 6
+          character: 19
+      children:
+        - name: name
+          detail: String
+          kind: 8
+          range:
+            start:
+              line: 7
+              character: 8
+            end:
+              line: 7
+              character: 20
+          selectionRange:
+            start:
+              line: 7
+              character: 15
+            end:
+              line: 7
+              character: 19
+        - name: timeoutMs
+          detail: Int32
+          kind: 8
+          range:
+            start:
+              line: 8
+              character: 8
+            end:
+              line: 8
+              character: 24
+          selectionRange:
+            start:
+              line: 8
+              character: 14
+            end:
+              line: 8
+              character: 23
+    - name: "Shape#1"
+      kind: 10
+      range:
+        start:
+          line: 11
+          character: 4
+        end:
+          line: 14
+          character: 6
+      selectionRange:
+        start:
+          line: 11
+          character: 10
+        end:
+          line: 11
+          character: 15
+      children:
+        - name: circle
+          detail: Void
+          kind: 22
+          range:
+            start:
+              line: 12
+              character: 8
+            end:
+              line: 12
+              character: 20
+          selectionRange:
+            start:
+              line: 12
+              character: 13
+            end:
+              line: 12
+              character: 19
+        - name: square
+          detail: Void
+          kind: 22
+          range:
+            start:
+              line: 13
+              character: 8
+            end:
+              line: 13
+              character: 20
+          selectionRange:
+            start:
+              line: 13
+              character: 13
+            end:
+              line: 13
+              character: 19
+    - name: "Alias#2"
+      detail: Settings
+      kind: 5
+      range:
+        start:
+          line: 16
+          character: 4
+        end:
+          line: 16
+          character: 28
+      selectionRange:
+        start:
+          line: 16
+          character: 9
+        end:
+          line: 16
+          character: 14
+    - name: Consumer
+      kind: 23
+      range:
+        start:
+          line: 18
+          character: 4
+        end:
+          line: 21
+          character: 6
+      selectionRange:
+        start:
+          line: 18
+          character: 11
+        end:
+          line: 18
+          character: 19
+      children:
+        - name: settings
+          detail: Settings
+          kind: 8
+          range:
+            start:
+              line: 19
+              character: 8
+            end:
+              line: 19
+              character: 26
+          selectionRange:
+            start:
+              line: 19
+              character: 17
+            end:
+              line: 19
+              character: 25
+        - name: shape
+          detail: Shape
+          kind: 8
+          range:
+            start:
+              line: 20
+              character: 8
+            end:
+              line: 20
+              character: 20
+          selectionRange:
+            start:
+              line: 20
+              character: 14
+            end:
+              line: 20
+              character: 19
