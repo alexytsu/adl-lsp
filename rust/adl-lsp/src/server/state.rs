@@ -2,8 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use async_lsp::{ClientSocket, LanguageClient};
-use lsp_types::{DocumentSymbol, PublishDiagnosticsParams, Url};
+use lsp_types::{Diagnostic, DocumentSymbol, Url};
 use tracing::debug;
 
 use crate::parser::symbols::DocumentSymbols;
@@ -32,13 +31,15 @@ impl AdlLanguageServerState {
 
     /// Atomically ingest a document, updating both content and parsed tree together.
     /// This ensures consistency between the document content and its AST representation.
+    ///
+    /// Returns the diagnostics collected for this document so the caller (the server layer,
+    /// which owns the client handle) can publish them. Returns `None` if parsing failed.
     pub fn ingest_document(
         &self,
-        client: &mut ClientSocket,
         parser: &mut AdlParser,
         uri: &Url,
         contents: String,
-    ) -> Option<()> {
+    ) -> Option<Vec<Diagnostic>> {
         debug!("ingesting document: {uri:?}");
 
         let parsed_tree = parser.parse(uri.clone(), &contents)?;
@@ -57,8 +58,15 @@ impl AdlLanguageServerState {
         let mut documents = self.documents.write().expect("poisoned");
         let mut trees = self.trees.write().expect("poisoned");
 
-        // TODO(med): also find the package root by walking up the file system from the module definition
-        let package_root = packages::find_package_root_by_marker(uri.path());
+        // Prefer an `adl-package.json` marker; otherwise derive the root from the module name by
+        // walking up the filesystem (module `a.b.c` in `<root>/a/b/c.adl` implies `<root>`).
+        let package_root = packages::find_package_root_by_marker(uri.path()).or_else(|| {
+            parsed_tree
+                .find_module_name(contents.as_bytes())
+                .and_then(|module_name| {
+                    packages::package_root_from_module(uri.path(), module_name)
+                })
+        });
         if let Some(package_root) = package_root {
             adl_file_to_package_root.insert(uri.clone(), package_root.clone());
             package_root_to_adl_files
@@ -115,14 +123,9 @@ impl AdlLanguageServerState {
         documents.insert(uri.clone(), contents);
         trees.insert(uri.clone(), parsed_tree.clone());
 
-        // TODO(alex): the state layer is probably the wrong layer to be publishing diagnostics or accessing the client handle
-        let _res = client.publish_diagnostics(PublishDiagnosticsParams {
-            uri: uri.clone(),
-            diagnostics,
-            version: None,
-        });
-
-        Some(())
+        // The state layer only collects diagnostics; publishing is the server layer's
+        // responsibility since it owns the client handle.
+        Some(diagnostics)
     }
 
     pub fn clear_cache(&mut self) {

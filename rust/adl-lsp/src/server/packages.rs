@@ -23,6 +23,23 @@ pub fn find_package_root_by_marker<T: AsRef<Path>>(path: T) -> Option<PathBuf> {
     }
 }
 
+/// Derive a package root from a file's path and its declared module name.
+///
+/// A module `a.b.c` declared in `<root>/a/b/c.adl` implies the package root is `<root>`, reached by
+/// walking up `module_name.split('.').count()` ancestors from the file. This is a fallback for
+/// workspaces without an `adl-package.json` marker (see [`find_package_root_by_marker`]).
+pub fn package_root_from_module<T: AsRef<Path>>(file_path: T, module_name: &str) -> Option<PathBuf> {
+    if module_name.is_empty() {
+        return None;
+    }
+    let module_depth = module_name.split('.').count();
+    file_path
+        .as_ref()
+        .ancestors()
+        .nth(module_depth)
+        .map(Path::to_path_buf)
+}
+
 /// Resolve a dependency path, handling both relative and absolute paths
 pub fn resolve_dependency_path<T: AsRef<Path>>(package_root: T, localdir: &str) -> PathBuf {
     // Check if it's an absolute path
@@ -65,7 +82,10 @@ pub struct AdlPackageDefinition {
 
 pub fn resolve_import(
     search_dirs: &HashMap<PathBuf, HashSet<Url>>,
-    // TODO(med): don't need these parameters if we trust fully in the search dirs being passed in
+    // `source_uri` and `source_module` are retained (not redundant): they let us derive the
+    // source package root by walking up `source_module` ancestors so imports resolve to the
+    // *source* package first. `document_exists` supports the implicit-resolution path used when
+    // `search_dirs` is empty (e.g. single-file / marker-less workspaces).
     source_uri: &Url,
     source_module: &str,
     imported_module_path: &[&str],
@@ -107,35 +127,32 @@ pub fn resolve_import(
         }
         let target_uri = Url::from_file_path(&target_path);
         if let Ok(target_uri) = target_uri {
+            // Prefer the discovered-files cache when it is populated.
             if let Some(adl_files) = search_dirs.get(*package_root) {
                 if adl_files.contains(&target_uri) {
                     return Some(target_uri);
                 }
             }
-        }
-    }
-
-    // NOTE(alex): the below checks are redundant as the lookup above should always succeed
-    for package_root in &package_roots {
-        let target_path = package_root.join(format!("{}.adl", imported_module_path.join("/")));
-        if let Some(ref source_package_target_path) = source_package_target_path {
-            if &target_path == source_package_target_path {
-                continue;
+            // Fall back to a filesystem probe. This covers marker-less workspaces where the
+            // cache is empty, and files discovered after the initial workspace scan.
+            if document_exists(&target_path) {
+                if search_dirs.get(*package_root).is_some_and(|f| !f.is_empty()) {
+                    error!(
+                        "found target path: {} on disk but wasn't found in the search_dir cache",
+                        target_path.display()
+                    );
+                }
+                return Some(target_uri);
             }
-        }
-        if document_exists(&target_path) {
-            error!(
-                "found target path: {} on disk but wasn't found in the search_dir cache",
-                target_path.display()
-            );
-            return Some(Url::from_file_path(&target_path).expect("invalid file path"));
         }
     }
 
     None
 }
 
-// TODO(low): the below tests rely on finding the files on disk, assuming a cache miss
+// Most tests below drive the filesystem-probe fallback via `document_exists`, simulating a
+// marker-less workspace with an empty discovery cache. `test_resolve_from_other_package_root_cached`
+// instead exercises the populated-cache path.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,5 +272,29 @@ mod tests {
             resolved,
             Some(Url::parse("file:///project/adl-strings/common/strings.adl").unwrap())
         );
+    }
+
+    #[test]
+    fn test_resolve_from_other_package_root_cached() {
+        // The discovery cache for `adl-strings` is populated with the target file, so resolution
+        // succeeds via the cache without any filesystem probe (`document_exists` always false).
+        let target_uri = Url::parse("file:///project/adl-strings/common/strings.adl").unwrap();
+        let search_dirs = HashMap::from([
+            (PathBuf::from("/project/adl"), HashSet::from([])),
+            (PathBuf::from("/project/adl-no-strings"), HashSet::from([])),
+            (
+                PathBuf::from("/project/adl-strings"),
+                HashSet::from([target_uri.clone()]),
+            ),
+        ]);
+        let source_uri = Url::parse("file:///project/adl/common/main.adl").unwrap();
+        let resolved = resolve_import(
+            &search_dirs,
+            &source_uri,
+            "common.main",
+            &["common", "strings"],
+            &|_| false,
+        );
+        assert_eq!(resolved, Some(target_uri));
     }
 }

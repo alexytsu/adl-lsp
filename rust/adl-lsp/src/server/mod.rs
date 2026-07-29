@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_lsp::router::Router;
-use async_lsp::{ClientSocket, Error, ErrorCode, ResponseError};
+use async_lsp::{ClientSocket, Error, ErrorCode, LanguageClient, ResponseError};
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
     CompletionResponse, DiagnosticOptions, DiagnosticServerCapabilities,
@@ -14,8 +14,9 @@ use lsp_types::{
     DocumentSymbolResponse, FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
     FileOperationRegistrationOptions, FullDocumentDiagnosticReport, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, OneOf, Position, Range, ReferenceParams,
-    RelatedFullDocumentDiagnosticReport, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
+    InitializeParams, InitializeResult, Location, OneOf, Position, PublishDiagnosticsParams, Range,
+    ReferenceParams, RelatedFullDocumentDiagnosticReport, RenameParams, SaveOptions,
+    ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
     Url, WorkDoneProgressOptions, WorkspaceEdit, WorkspaceFileOperationsServerCapabilities,
     WorkspaceServerCapabilities,
@@ -133,9 +134,20 @@ impl Server {
     }
 
     fn ingest_document(&mut self, uri: &Url, contents: String) {
-        let mut parser = self.parser.lock().expect("poisoned");
-        self.state
-            .ingest_document(&mut self.client, &mut parser, uri, contents);
+        let diagnostics = {
+            let mut parser = self.parser.lock().expect("poisoned");
+            self.state.ingest_document(&mut parser, uri, contents)
+        };
+
+        // The server layer owns the client handle, so it is responsible for publishing the
+        // diagnostics collected by the state layer.
+        if let Some(diagnostics) = diagnostics {
+            let _res = self.client.publish_diagnostics(PublishDiagnosticsParams {
+                uri: uri.clone(),
+                diagnostics,
+                version: None,
+            });
+        }
     }
 
     /// Initialize the server by discovering and processing all ADL files in package roots
