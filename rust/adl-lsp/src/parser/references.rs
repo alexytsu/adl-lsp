@@ -68,17 +68,27 @@ impl ParsedTree {
         v.extend(locations);
     }
 
+    /// Decide whether a matching node counts as a reference, avoiding double-counting.
+    ///
+    /// A `user_defined_name` match is either a `scoped_name` or a bare `identifier`. When a
+    /// single-segment `scoped_name` (e.g. `User`) matches, it and its `identifier` child cover the
+    /// exact same range, so we keep the `scoped_name` and drop the child. Multi-segment references
+    /// (e.g. `common.string.StringNE`) only match at their final `identifier` segment — the
+    /// enclosing `scoped_name` text differs from the identifier — so those identifiers must be
+    /// kept. Identifiers therefore cannot simply be ignored.
     fn should_include_reference(node: &Node<'_>, identifier: &str, content: &[u8]) -> bool {
-        // TODO(med): investigate this further. is this is a hack? i think we can probably just ignore identifiers
+        // Always include scoped_name matches.
         if NodeKind::is_scoped_name(node) {
             return true;
         }
 
+        // Include identifiers unless they are the sole segment of a scoped_name that already
+        // matches — that scoped_name is counted instead, avoiding a duplicate at the same range.
         if NodeKind::is_identifier(node) {
             if let Some(parent) = node.parent() {
-                let is_child_of_scoped_name = NodeKind::is_scoped_name(&parent)
-                    && parent.utf8_text(content).unwrap_or("") == identifier;
-                return !is_child_of_scoped_name;
+                let duplicates_parent_scoped_name = NodeKind::is_scoped_name(&parent)
+                    && parent.utf8_text(content).unwrap_or_default() == identifier;
+                return !duplicates_parent_scoped_name;
             }
         }
 
@@ -118,5 +128,10 @@ mod test {
 
         let user_refs = tree.find_references("User", contents.as_bytes());
         assert_yaml_snapshot!(user_refs);
+
+        // StringNE is only used via the fully-qualified `common.string.StringNE`, so it is matched
+        // at the final identifier segment (not the enclosing scoped_name) and must be found once.
+        let string_ne_refs = tree.find_references("StringNE", contents.as_bytes());
+        assert_yaml_snapshot!(string_ne_refs);
     }
 }

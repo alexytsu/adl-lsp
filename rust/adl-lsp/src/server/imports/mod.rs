@@ -583,16 +583,8 @@ impl ImportsCache {
         let type_def_nodes = tree.find_all_nodes(NodeKind::is_local_definition);
 
         for type_def in type_def_nodes {
-            // TODO(med): use a custom AdlNode here to handle the type name logic
-            // The type name is the first child that is a type_name
-            if let Some(type_name_node) = type_def
-                .children(&mut type_def.walk())
-                .find(|child| NodeKind::is_type_name(child))
-            {
-                if let Ok(type_name) = type_name_node.utf8_text(content) {
-                    type_definitions
-                        .push(Fqn::from_module_name_and_type_name(module_name, type_name));
-                }
+            if let Some(type_name) = crate::node::definition_type_name(&type_def, content) {
+                type_definitions.push(Fqn::from_module_name_and_type_name(module_name, type_name));
             }
         }
 

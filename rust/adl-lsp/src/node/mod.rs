@@ -4,6 +4,16 @@ pub use kind::NodeKind;
 use tracing::warn;
 use tree_sitter::{Node, TreeCursor};
 
+/// Extract the declared type name from a definition node (`type`/`newtype`/`struct`/`union`).
+///
+/// Every ADL definition names its type via a single `type_name` child; this returns its text.
+/// Centralises the child-walk that would otherwise be duplicated at each call site.
+pub fn definition_type_name<'b>(node: &Node<'_>, content: &'b [u8]) -> Option<&'b str> {
+    node.children(&mut node.walk())
+        .find(NodeKind::is_type_name)
+        .and_then(|type_name_node| type_name_node.utf8_text(content).ok())
+}
+
 /// Type-safe helpers to perform operations on known-node types
 #[allow(dead_code)]
 pub enum AdlNode<'a> {
