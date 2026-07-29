@@ -19,9 +19,18 @@ pub fn is_missing_semicolon(node: &Node<'_>) -> bool {
 /// Every ADL definition names its type via a single `type_name` child; this returns its text.
 /// Centralises the child-walk that would otherwise be duplicated at each call site.
 pub fn definition_type_name<'b>(node: &Node<'_>, content: &'b [u8]) -> Option<&'b str> {
-    node.children(&mut node.walk())
-        .find(NodeKind::is_type_name)
+    node.child_by_field_name("name")
+        .filter(NodeKind::is_type_name)
         .and_then(|type_name_node| type_name_node.utf8_text(content).ok())
+}
+
+/// Extract a definition's version tag (the `#2` in `struct X#2 { ... }`), if present.
+///
+/// Grammar v0.7 exposes this as the optional `version:` field on
+/// `struct`/`union`/`type`/`newtype` definitions; its text includes the leading `#`.
+pub fn definition_version<'b>(node: &Node<'_>, content: &'b [u8]) -> Option<&'b str> {
+    node.child_by_field_name("version")
+        .and_then(|version_node| version_node.utf8_text(content).ok())
 }
 
 /// Type-safe helpers to perform operations on known-node types
@@ -66,16 +75,11 @@ impl<'a> AdlModuleDefinition<'a> {
     }
 
     pub fn module_name<'b>(&self, content: &'b [u8]) -> &'b str {
-        let module_or_preamble = self
-            .node
-            .child(0)
-            .expect("module_definition should have children");
-        let scoped_name = if NodeKind::is_definition_preamble(&module_or_preamble) {
-            self.node.child(2).expect("expected scoped_name")
-        } else {
-            self.node.child(1).expect("expected scoped_name")
-        };
-        scoped_name.utf8_text(content).expect("utf-8 parse error")
+        self.node
+            .child_by_field_name("name")
+            .expect("module_definition should have a name: field")
+            .utf8_text(content)
+            .expect("utf-8 parse error")
     }
 }
 
@@ -105,51 +109,57 @@ impl<'a> AdlImportDeclaration<'a> {
         }
     }
 
-    pub fn is_star_import(node: &Node<'a>) -> bool {
-        node.child(1)
-            .expect("expected import_path")
-            .child(1)
-            .is_some() // either scoped name or scoped_name.*
+    /// The `path:` field of the import declaration (an `import_path` node).
+    fn import_path(node: &Node<'a>) -> Node<'a> {
+        node.child_by_field_name("path")
+            .expect("import_declaration should have a path: field")
     }
 
+    /// A star import's `import_path` ends with a `.*` wildcard token after the scoped name.
+    pub fn is_star_import(node: &Node<'a>) -> bool {
+        let path = Self::import_path(node);
+        let mut cursor = path.walk();
+        path.children(&mut cursor)
+            .any(|child| child.kind().contains('*'))
+    }
+
+    /// Text of the scoped name inside the import path (the wildcard token excluded).
+    fn scoped_name_text<'b>(&self, content: &'b [u8]) -> &'b str {
+        let node = match self {
+            AdlImportDeclaration::FullyQualified(inner)
+            | AdlImportDeclaration::StarImport(inner) => &inner.node,
+        };
+        let path = Self::import_path(node);
+        let mut cursor = path.walk();
+        path.children(&mut cursor)
+            .find(NodeKind::is_scoped_name)
+            .expect("import_path should contain a scoped_name")
+            .utf8_text(content)
+            .expect("utf-8 parse error")
+    }
+
+    /// The module part of the import.
+    ///
+    /// A `scoped_name` does not distinguish module segments from the trailing type name, so the
+    /// split is inherently textual: for fully-qualified imports the final segment is the type
+    /// name (e.g. `mod.foo.Type` -> `mod.foo`); star imports name the module directly.
     pub fn module_name<'b>(&self, content: &'b [u8]) -> &'b str {
+        let full_name = self.scoped_name_text(content);
         match self {
-            AdlImportDeclaration::FullyQualified(scoped_name) => {
-                let full_name = scoped_name
-                    .node
-                    .child(1)
-                    .expect("expected import_path")
-                    .utf8_text(content)
-                    .expect("utf-8 parse error");
-                // Remove the last part (type name) from fully qualified names
-                // e.g., "mod.foo.Type" -> "mod.foo"
-                if let Some(last_dot_pos) = full_name.rfind('.') {
-                    &full_name[..last_dot_pos]
-                } else {
-                    full_name
-                }
-            }
-            AdlImportDeclaration::StarImport(scoped_name) => scoped_name
-                .node
-                .child(1)
-                .expect("expected import_path")
-                .child(0) // drop the .*
-                .expect("expected scoped_name")
-                .utf8_text(content)
-                .expect("utf-8 parse error"),
+            AdlImportDeclaration::FullyQualified(_) => match full_name.rfind('.') {
+                Some(last_dot_pos) => &full_name[..last_dot_pos],
+                None => full_name,
+            },
+            AdlImportDeclaration::StarImport(_) => full_name,
         }
     }
 
+    /// The imported type name (final segment) for fully-qualified imports; `None` for `.*`.
     pub fn imported_type_name<'b>(&self, content: &'b [u8]) -> Option<&'b str> {
         match self {
-            AdlImportDeclaration::FullyQualified(scoped_name) => scoped_name
-                .node
-                .child(1)
-                .expect("expected import_path")
-                .utf8_text(content)
-                .expect("utf-8 parse error")
-                .split('.')
-                .last(),
+            AdlImportDeclaration::FullyQualified(_) => {
+                self.scoped_name_text(content).split('.').next_back()
+            }
             AdlImportDeclaration::StarImport(_) => None,
         }
     }
