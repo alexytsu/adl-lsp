@@ -15,14 +15,20 @@ export async function activate(context: v.ExtensionContext) {
   console.log("ADL Language Server is starting...");
   const { dev, prod } = getLspExecutable(context.extensionPath);
 
-  // const serverOptions: ServerOptions = {
-  //   run: prod,
-  //   debug: prod,
-  // };
+  // In the Extension Development Host (F5) run the server via `cargo run` from
+  // the local checkout; installed builds always use the packaged/`adl.lspPath`
+  // binary. Falls back to prod if the dev checkout isn't present.
+  const useDev =
+    context.extensionMode === v.ExtensionMode.Development &&
+    dev.options?.cwd !== undefined;
+  const executable = useDev ? dev : prod;
+  console.log(
+    `Launching ADL Language Server in ${useDev ? "dev (cargo run)" : "prod"} mode: ${executable.command}`,
+  );
 
   const serverOptions: ServerOptions = {
-    run: dev,
-    debug: dev,
+    run: executable,
+    debug: executable,
   };
 
   const clientOptions: LanguageClientOptions = {
