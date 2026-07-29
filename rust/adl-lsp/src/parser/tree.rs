@@ -1,4 +1,4 @@
-use async_lsp::lsp_types::Position;
+use async_lsp::lsp_types::{Location, Position, Range};
 use tree_sitter::{Node, TreeCursor};
 
 use crate::parser::ts_lsp_interop as ts_lsp;
@@ -260,6 +260,81 @@ impl ParsedTree {
 
         None
     }
+
+    /// If the cursor is on the identifier of a `field_reference` inside an `annotation_declaration`
+    /// (e.g. the `title` in `annotation Message::title Doc "...";`), resolve it to the referenced
+    /// field's definition.
+    ///
+    /// Only locally-defined, unqualified target types are resolved for now; qualified/imported
+    /// target types (e.g. `common.db.User::field`) return `None` and fall through to the caller.
+    pub fn get_annotation_field_definition_at<'a>(
+        &'a self,
+        pos: &Position,
+        content: &'a [u8],
+    ) -> Option<Location> {
+        let node = self.get_node_at_position(pos)?;
+        if !NodeKind::is_identifier(&node) {
+            return None;
+        }
+
+        let field_reference = node.parent().filter(NodeKind::is_field_reference)?;
+        let annotation = field_reference
+            .parent()
+            .filter(NodeKind::is_annotation_declaration)?;
+        let field_name = node.utf8_text(content).ok()?;
+
+        // The first scoped_name child of the annotation is its target type.
+        let mut cursor = annotation.walk();
+        let target_type = annotation
+            .children(&mut cursor)
+            .find(|child| NodeKind::is_scoped_name(child))?
+            .utf8_text(content)
+            .ok()?;
+
+        // TODO(low): resolve qualified/imported annotation targets via the import table (would
+        // require threading the server's import resolution into this path).
+        if target_type.contains('.') {
+            return None;
+        }
+
+        self.find_field_definition_in_type(target_type, field_name, content)
+    }
+
+    /// Find the definition location of a field named `field_name` within a locally-defined
+    /// struct/union named `type_name`.
+    fn find_field_definition_in_type<'a>(
+        &'a self,
+        type_name: &str,
+        field_name: &str,
+        content: &'a [u8],
+    ) -> Option<Location> {
+        for definition in self.find_all_nodes(NodeKind::is_local_definition) {
+            if crate::node::definition_type_name(&definition, content) != Some(type_name) {
+                continue;
+            }
+
+            for field in self.find_all_nodes_from(definition, NodeKind::is_field) {
+                // The field's name is its direct `identifier` child (the type_expression comes
+                // before it and is a distinct node kind).
+                let mut field_cursor = field.walk();
+                let Some(name_node) =
+                    field.children(&mut field_cursor).find(NodeKind::is_identifier)
+                else {
+                    continue;
+                };
+                if name_node.utf8_text(content).ok() == Some(field_name) {
+                    return Some(Location {
+                        uri: self.uri.clone(),
+                        range: Range {
+                            start: ts_lsp::ts_to_lsp_position(&name_node.start_position()),
+                            end: ts_lsp::ts_to_lsp_position(&name_node.end_position()),
+                        },
+                    });
+                }
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -376,4 +451,43 @@ mod tests {
             panic!("Expected to find module path in star import");
         }
     }
+
+    #[test]
+    fn test_annotation_field_goto() {
+        let uri: Url = "file://test.adl".parse().unwrap();
+        let contents = r#"module test.module {
+    struct Message {
+        String title;
+        String body;
+    };
+
+    annotation Message::title Doc "documentation";
+};"#;
+
+        let mut parser = AdlParser::new();
+        let tree = parser.parse(uri, contents.as_bytes()).unwrap();
+
+        // Cursor on `title` in `annotation Message::title ...` (line 6) resolves to the `title`
+        // field definition on line 2.
+        let position = Position {
+            line: 6,
+            character: 26,
+        };
+        let location = tree
+            .get_annotation_field_definition_at(&position, contents.as_bytes())
+            .expect("expected annotation field reference to resolve to the field definition");
+        assert_eq!(location.range.start.line, 2);
+        assert_eq!(location.range.start.character, 15);
+
+        // Cursor on the annotation type `Doc` is not a field reference.
+        let position = Position {
+            line: 6,
+            character: 31,
+        };
+        assert!(
+            tree.get_annotation_field_definition_at(&position, contents.as_bytes())
+                .is_none()
+        );
+    }
 }
+

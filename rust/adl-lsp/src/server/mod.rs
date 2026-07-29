@@ -621,6 +621,12 @@ impl Server {
             return self.handle_module_navigation(&module_path, &source_module, &uri);
         }
 
+        // Annotation field references (e.g. `title` in `annotation Message::title Doc "...";`)
+        // resolve to the field definition rather than a scoped_name type.
+        if let Some(location) = tree.get_annotation_field_definition_at(&position, content) {
+            return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+        }
+
         // Fall back to the original identifier-based navigation
         let Some((identifier, node)) = tree.get_identifier_at(&position, content) else {
             return Ok(None);
