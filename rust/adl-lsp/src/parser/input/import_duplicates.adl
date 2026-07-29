@@ -1,0 +1,10 @@
+module input.message {
+    import common.db.User;
+    import common.db.User;
+    import common.strings.*;
+    import common.strings.*;
+
+    type Name = String;
+
+    import common.db.Hello;
+};

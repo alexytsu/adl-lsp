@@ -1,0 +1,174 @@
+---
+source: src/parser/symbols.rs
+expression: symbols
+---
+- name: sample.simple
+  kind: 2
+  range:
+    start:
+      line: 1
+      character: 12
+    end:
+      line: 16
+      character: 14
+  selectionRange:
+    start:
+      line: 1
+      character: 12
+    end:
+      line: 16
+      character: 14
+  children:
+    - name: Person
+      kind: 23
+      range:
+        start:
+          line: 2
+          character: 16
+        end:
+          line: 5
+          character: 18
+      selectionRange:
+        start:
+          line: 2
+          character: 16
+        end:
+          line: 5
+          character: 18
+      children:
+        - name: name
+          detail: String
+          kind: 8
+          range:
+            start:
+              line: 3
+              character: 20
+            end:
+              line: 3
+              character: 32
+          selectionRange:
+            start:
+              line: 3
+              character: 20
+            end:
+              line: 3
+              character: 32
+        - name: Int
+          detail: Int
+          kind: 8
+          range:
+            start:
+              line: 4
+              character: 20
+            end:
+              line: 4
+              character: 28
+          selectionRange:
+            start:
+              line: 4
+              character: 20
+            end:
+              line: 4
+              character: 23
+    - name: Color
+      kind: 10
+      range:
+        start:
+          line: 7
+          character: 16
+        end:
+          line: 11
+          character: 18
+      selectionRange:
+        start:
+          line: 7
+          character: 16
+        end:
+          line: 11
+          character: 18
+      children:
+        - name: red
+          detail: Void
+          kind: 22
+          range:
+            start:
+              line: 8
+              character: 20
+            end:
+              line: 8
+              character: 29
+          selectionRange:
+            start:
+              line: 8
+              character: 20
+            end:
+              line: 8
+              character: 29
+        - name: green
+          detail: Void
+          kind: 22
+          range:
+            start:
+              line: 9
+              character: 20
+            end:
+              line: 9
+              character: 31
+          selectionRange:
+            start:
+              line: 9
+              character: 20
+            end:
+              line: 9
+              character: 31
+        - name: blue
+          detail: Void
+          kind: 22
+          range:
+            start:
+              line: 10
+              character: 20
+            end:
+              line: 10
+              character: 30
+          selectionRange:
+            start:
+              line: 10
+              character: 20
+            end:
+              line: 10
+              character: 30
+    - name: UserId
+      detail: Int32
+      kind: 5
+      range:
+        start:
+          line: 13
+          character: 16
+        end:
+          line: 13
+          character: 36
+      selectionRange:
+        start:
+          line: 13
+          character: 16
+        end:
+          line: 13
+          character: 36
+    - name: Email
+      detail: String
+      kind: 5
+      range:
+        start:
+          line: 15
+          character: 16
+        end:
+          line: 15
+          character: 39
+      selectionRange:
+        start:
+          line: 15
+          character: 16
+        end:
+          line: 15
+          character: 39

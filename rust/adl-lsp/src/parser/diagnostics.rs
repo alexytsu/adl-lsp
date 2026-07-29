@@ -184,8 +184,9 @@ impl ParsedTree {
             })
             .collect();
 
-        // TODO(med): attempt to resolve imports and report errors for invalid imports
-        // TODO(med): check for unused or duplicate imports
+        // Note: invalid-import resolution (module/type not found) is handled at the workspace
+        // layer in `imports::collect_invalid_import_diagnostics`, which needs cross-file context.
+        // Here we only cover the tree-local checks: import ordering and duplicates.
 
         let mut diagnostics = out_of_order_imports;
         diagnostics.extend(duplicate_imports);
@@ -221,6 +222,16 @@ mod test {
     fn test_collect_import_error() {
         let url: Url = "file://foo/importerror.adl".parse().unwrap();
         let contents = include_str!("input/importerror.adl");
+
+        let parsed = AdlParser::new().parse(url.clone(), contents);
+        assert!(parsed.is_some());
+        assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics(contents));
+    }
+
+    #[test]
+    fn test_collect_duplicate_and_out_of_order_imports() {
+        let url: Url = "file://foo/import_duplicates.adl".parse().unwrap();
+        let contents = include_str!("input/import_duplicates.adl");
 
         let parsed = AdlParser::new().parse(url.clone(), contents);
         assert!(parsed.is_some());
