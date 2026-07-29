@@ -18,7 +18,8 @@ use lsp_types::{
     InitializeParams, InitializeResult, Location, OneOf, Position, PublishDiagnosticsParams, Range,
     ReferenceParams, RelatedFullDocumentDiagnosticReport, RenameParams, SaveOptions,
     ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
+    TextDocumentSyncKind, TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions,
+    WorkspaceEdit,
     WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
 };
 use lsp_types::{notification, request};
@@ -429,7 +430,10 @@ impl Server {
                         })),
                         will_save: None,
                         will_save_wait_until: None, // NOTE: could be used to run autoformatting here, returning a list of edits
-                        change: None, // Not responding per change until a more permissive grammar is integrated
+                        // Full-text sync on every change: the v0.7 grammar is permissive enough
+                        // to parse mid-edit states, so we re-ingest on each keystroke.
+                        // Incremental sync (Tree::edit) is a future optimisation.
+                        change: Some(TextDocumentSyncKind::FULL),
                     },
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -1176,21 +1180,20 @@ impl Server {
         ControlFlow::Continue(())
     }
 
+    /// With `TextDocumentSyncKind::FULL`, each didChange carries the complete document text.
+    /// Re-ingest it through the same path as didOpen/didSave: parse, refresh the caches, and
+    /// publish diagnostics.
     pub fn handle_did_change_text_document(
         &mut self,
         params: DidChangeTextDocumentParams,
     ) -> ControlFlow<Result<(), Error>> {
-        error!("unexpected textDocument/didChange event");
-
         let uri = params.text_document.uri;
-        let contents = params.content_changes.first();
-
         trace!("textDocument/didChange event for {}", uri.path());
 
-        if let Some(change) = contents {
-            let contents = change.text.clone();
-            trace!("textDocument/didChange content is {:?}", change);
-            self.ingest_document(&uri, contents);
+        // Full sync sends exactly one change containing the whole document; if a client ever
+        // sends several, the last one is the most recent full snapshot.
+        if let Some(change) = params.content_changes.into_iter().next_back() {
+            self.ingest_document(&uri, change.text);
         }
 
         ControlFlow::Continue(())
