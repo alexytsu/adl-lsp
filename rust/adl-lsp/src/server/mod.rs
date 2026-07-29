@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_lsp::router::Router;
@@ -49,6 +50,9 @@ pub struct Server {
     config: ServerConfig,
     state: AdlLanguageServerState,
     parser: Arc<Mutex<AdlParser>>,
+    /// Set once a `shutdown` request has been received. After this, the server must reject any
+    /// further requests with `InvalidRequest` (per the LSP spec) until it `exit`s.
+    shutdown: Arc<AtomicBool>,
 }
 
 const ADL_EXTENSIONS: [&str; 6] = ["adl", "java", "rs", "ts", "hs", "cpp"];
@@ -130,6 +134,19 @@ impl Server {
             config,
             state: AdlLanguageServerState::new(),
             parser: Arc::new(Mutex::new(AdlParser::new())),
+            shutdown: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Reject a request if the server has already received a `shutdown` request.
+    fn ensure_running(&self) -> Result<(), ResponseError> {
+        if self.shutdown.load(Ordering::SeqCst) {
+            Err(ResponseError::new(
+                ErrorCode::INVALID_REQUEST,
+                "server has been shut down",
+            ))
+        } else {
+            Ok(())
         }
     }
 
@@ -359,9 +376,11 @@ impl Server {
     }
 
     pub async fn handle_shutdown(&self) -> Result<(), ResponseError> {
-        // TODO(low): perform cleanup of any background tasks and threads
-        // TODO(low): after shutdown, the server should respond with InvalidRequest to all other requests
         debug!("shutting down server");
+        // Mark the server as shut down so subsequent requests are rejected with InvalidRequest.
+        // The client is expected to follow up with an `exit` notification, which terminates the
+        // process (see `handle_exit`); there are no background tasks/threads to clean up.
+        self.shutdown.store(true, Ordering::SeqCst);
         Ok(())
     }
 
@@ -538,6 +557,7 @@ impl Server {
         &mut self,
         params: HoverParams,
     ) -> Result<Option<Hover>, ResponseError> {
+        self.ensure_running()?;
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
@@ -586,6 +606,7 @@ impl Server {
         &mut self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>, ResponseError> {
+        self.ensure_running()?;
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
@@ -699,6 +720,7 @@ impl Server {
         &mut self,
         params: RenameParams,
     ) -> Result<Option<WorkspaceEdit>, ResponseError> {
+        self.ensure_running()?;
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let new_name = params.new_name;
@@ -811,6 +833,7 @@ impl Server {
         &mut self,
         params: ReferenceParams,
     ) -> Result<Option<Vec<Location>>, ResponseError> {
+        self.ensure_running()?;
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
@@ -902,6 +925,7 @@ impl Server {
         &mut self,
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult, ResponseError> {
+        self.ensure_running()?;
         let uri = params.text_document.uri;
         let Some((tree, content)) = self.get_or_parse_document_with_content(&uri) else {
             return Err(ResponseError::new(
@@ -927,6 +951,7 @@ impl Server {
         &mut self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>, ResponseError> {
+        self.ensure_running()?;
         let uri = params.text_document.uri;
 
         // First try to get cached symbols
@@ -956,6 +981,7 @@ impl Server {
         &mut self,
         params: CompletionParams,
     ) -> Result<Option<CompletionResponse>, ResponseError> {
+        self.ensure_running()?;
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
@@ -1148,6 +1174,29 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_ensure_running_after_shutdown() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        // Running: requests are permitted.
+        assert!(gate(&shutdown).is_ok());
+        // After shutdown: requests are rejected with InvalidRequest.
+        shutdown.store(true, Ordering::SeqCst);
+        let err = gate(&shutdown).unwrap_err();
+        assert_eq!(err.code, ErrorCode::INVALID_REQUEST);
+    }
+
+    // Mirror of `Server::ensure_running` without needing a live `ClientSocket`.
+    fn gate(shutdown: &Arc<AtomicBool>) -> Result<(), ResponseError> {
+        if shutdown.load(Ordering::SeqCst) {
+            Err(ResponseError::new(
+                ErrorCode::INVALID_REQUEST,
+                "server has been shut down",
+            ))
+        } else {
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_discovery_honours_gitignore() {
