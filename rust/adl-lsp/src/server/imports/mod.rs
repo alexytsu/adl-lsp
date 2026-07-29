@@ -3,16 +3,30 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use async_lsp::lsp_types::Url;
+use async_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range, Url};
 use tracing::{debug, trace};
+use tree_sitter::Node;
 
 use crate::node::{AdlImportDeclaration, AdlModuleDefinition, NodeKind};
 use crate::parser::ParsedTree;
 use crate::parser::tree::Tree;
+use crate::parser::ts_lsp_interop::ts_to_lsp_position;
 use crate::server::packages;
 
 mod fqn;
 pub use fqn::Fqn;
+
+fn import_diagnostic(node: &Node<'_>, message: String) -> Diagnostic {
+    Diagnostic {
+        range: Range {
+            start: ts_to_lsp_position(&node.start_position()),
+            end: ts_to_lsp_position(&node.end_position()),
+        },
+        severity: Some(DiagnosticSeverity::ERROR),
+        message,
+        ..Default::default()
+    }
+}
 
 /// A table that caches resolved imports to avoid repeated tree traversals
 #[derive(Debug, Clone, Default)]
@@ -76,6 +90,11 @@ impl ImportsCache {
     /// Returns a tuple of (module_suggestions, type_suggestions)
     pub fn get_import_completions(&self, prefix: &str) -> (Vec<String>, Vec<Fqn>) {
         let all_fqns = self.get_all_fqns();
+        debug!(
+            "import completions: prefix={:?}, fqns_total={}",
+            prefix,
+            all_fqns.len()
+        );
 
         // Parse the prefix to understand what the user is typing
         let trimmed_prefix = prefix.trim();
@@ -89,6 +108,7 @@ impl ImportsCache {
 
         if import_part.is_empty() {
             // Return all top-level modules
+            debug!("import completion branch: top-level modules");
             return self.get_all_modules();
         }
 
@@ -97,14 +117,116 @@ impl ImportsCache {
         if import_part.ends_with('.') {
             // User just typed a dot, suggest next level modules or types
             let prefix_parts = &parts[..parts.len() - 1]; // Remove empty last part
+            debug!(
+                "import completion branch: after-prefix dot, prefix_parts={:?}",
+                prefix_parts
+            );
             self.get_completions_after_prefix(prefix_parts, &all_fqns)
         } else {
             // User is in the middle of typing, suggest matching completions
             let (complete_parts, partial_part) = parts.split_at(parts.len().saturating_sub(1));
             let partial = partial_part.get(0).map_or("", |v| *v);
 
+            debug!(
+                "import completion branch: partial, complete_parts={:?}, partial={:?}",
+                complete_parts, partial
+            );
             self.get_partial_completions(complete_parts, partial, &all_fqns)
         }
+    }
+
+    pub fn collect_invalid_import_diagnostics(
+        &self,
+        search_dirs: &HashMap<PathBuf, HashSet<Url>>,
+        source_uri: &Url,
+        source_tree: &ParsedTree,
+        source_content: &[u8],
+        get_or_parse_document_tree: &mut impl FnMut(&Url) -> Option<ParsedTree>,
+    ) -> Vec<Diagnostic> {
+        let module_definition = match source_tree.find_module_definition() {
+            Some(module_definition) => module_definition,
+            None => return Vec::new(),
+        };
+        let source_module = module_definition.module_name(source_content);
+
+        let mut diagnostics = Vec::new();
+        for node in source_tree.find_all_nodes(NodeKind::is_import_declaration) {
+            let Some(import_decl) = AdlImportDeclaration::try_new(node) else {
+                continue;
+            };
+
+            let AdlImportDeclaration::FullyQualified(_) = import_decl else {
+                continue;
+            };
+
+            let module_name = import_decl.module_name(source_content);
+            let Some(type_name) = import_decl.imported_type_name(source_content) else {
+                continue;
+            };
+
+            let module_parts: Vec<&str> = module_name.split('.').collect();
+            let target_uri = packages::resolve_import(
+                search_dirs,
+                source_uri,
+                source_module,
+                module_parts.as_slice(),
+                &|path| std::fs::metadata(path).is_ok(),
+            );
+
+            let Some(target_uri) = target_uri else {
+                diagnostics.push(import_diagnostic(
+                    &node,
+                    format!("imported module '{}' not found", module_name),
+                ));
+                continue;
+            };
+
+            let Some(defines_type) = self.target_module_defines_type(
+                &target_uri,
+                module_name,
+                type_name,
+                get_or_parse_document_tree,
+            ) else {
+                diagnostics.push(import_diagnostic(
+                    &node,
+                    format!(
+                        "failed to read module '{}' for import validation",
+                        module_name
+                    ),
+                ));
+                continue;
+            };
+
+            if !defines_type {
+                diagnostics.push(import_diagnostic(
+                    &node,
+                    format!(
+                        "imported type '{}' not found in module '{}'",
+                        type_name, module_name
+                    ),
+                ));
+            }
+        }
+
+        diagnostics
+    }
+
+    fn target_module_defines_type(
+        &self,
+        target_uri: &Url,
+        module_name: &str,
+        type_name: &str,
+        get_or_parse_document_tree: &mut impl FnMut(&Url) -> Option<ParsedTree>,
+    ) -> Option<bool> {
+        let target_content = std::fs::read_to_string(target_uri.path()).ok()?;
+        let target_tree = get_or_parse_document_tree(target_uri)?;
+
+        let type_definitions = self.find_type_definitions(&target_tree, target_content.as_bytes());
+        Some(
+            type_definitions
+                .iter()
+                .any(|fqn| fqn.module_name() == module_name && fqn.type_name() == type_name),
+        )
     }
 
     /// Get all unique module names
@@ -121,6 +243,11 @@ impl ImportsCache {
 
         let mut module_list: Vec<String> = modules.into_iter().collect();
         module_list.sort();
+
+        debug!(
+            "import completion modules: top_level_count={}",
+            module_list.len()
+        );
 
         (module_list, vec![])
     }
@@ -150,6 +277,12 @@ impl ImportsCache {
         let mut module_list: Vec<String> = modules.into_iter().collect();
         module_list.sort();
         types.sort_by(|a, b| a.type_name().cmp(b.type_name()));
+
+        debug!(
+            "import completion after-prefix: modules={}, types={}",
+            module_list.len(),
+            types.len()
+        );
 
         (module_list, types)
     }
@@ -195,6 +328,12 @@ impl ImportsCache {
         let mut module_list: Vec<String> = modules.into_iter().collect();
         module_list.sort();
         types.sort_by(|a, b| a.type_name().cmp(b.type_name()));
+
+        debug!(
+            "import completion partial: modules={}, types={}",
+            module_list.len(),
+            types.len()
+        );
 
         (module_list, types)
     }
@@ -364,7 +503,13 @@ impl ImportsCache {
                         .imported_type_name(source_content)
                         .expect(" expected FullyQualified import to have a type_name "),
                 );
-                self.resolve_fully_qualified_import(search_dirs, source_uri, source_module, &fqn);
+                self.resolve_fully_qualified_import(
+                    search_dirs,
+                    source_uri,
+                    source_module,
+                    &fqn,
+                    get_or_parse_document_tree,
+                );
             }
             AdlImportDeclaration::StarImport(_) => {
                 let imported_module_path: Vec<&str> =
@@ -462,6 +607,7 @@ impl ImportsCache {
         source_uri: &Url,
         source_module: &str,
         import: &Fqn,
+        get_or_parse_document_tree: &mut impl FnMut(&Url) -> Option<ParsedTree>,
     ) {
         debug!("resolving fully-qualified import: {:?}", import);
 
@@ -478,14 +624,33 @@ impl ImportsCache {
         if let Some(ref target_uri) = possible_path {
             // Only add the symbol if the target file actually exists
             if std::fs::metadata(target_uri.path()).is_ok() {
-                trace!(
-                    "target file exists, adding to imports table: {}",
-                    target_uri.path()
-                );
-                // TODO(high): check if the target file actually contains the definition
-                // right now the LSP blindly trust the import and assume that the target file defines it
-                // here's an opportunity to publish diagnostics for invalid imports
-                self.register_import(source_uri, import, target_uri);
+                match self.target_module_defines_type(
+                    target_uri,
+                    import.module_name(),
+                    import.type_name(),
+                    get_or_parse_document_tree,
+                ) {
+                    Some(true) => {
+                        trace!(
+                            "target file exists, adding to imports table: {}",
+                            target_uri.path()
+                        );
+                        self.register_import(source_uri, import, target_uri);
+                    }
+                    Some(false) => {
+                        debug!(
+                            "target file {} does not define type {}, skipping import registration",
+                            target_uri.path(),
+                            import.type_name()
+                        );
+                    }
+                    None => {
+                        debug!(
+                            "failed to read/parse target file {}, skipping import registration",
+                            target_uri.path()
+                        );
+                    }
+                }
             } else {
                 trace!(
                     "target file does not exist, skipping: {}",

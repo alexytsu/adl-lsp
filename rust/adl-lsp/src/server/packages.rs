@@ -77,17 +77,6 @@ pub fn resolve_import(
         imported_module_path,
     );
 
-    // Check if the source package is in other package roots
-    for (package_root, adl_files) in search_dirs {
-        let target_path = package_root.join(format!("{}.adl", imported_module_path.join("/")));
-        let target_uri = Url::from_file_path(&target_path);
-        if let Ok(target_uri) = target_uri {
-            if adl_files.contains(&target_uri) {
-                return Some(target_uri);
-            }
-        }
-    }
-
     // Get the root of the package that contains the source module
     let source_path = Path::new(source_uri.path());
     let source_module_path: Vec<&str> = source_module.split(".").collect();
@@ -105,8 +94,29 @@ pub fn resolve_import(
         }
     }
 
+    // Check other package roots only after attempting the source package
+    let mut package_roots: Vec<&PathBuf> = search_dirs.keys().collect();
+    package_roots.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+
+    for package_root in &package_roots {
+        let target_path = package_root.join(format!("{}.adl", imported_module_path.join("/")));
+        if let Some(ref source_package_target_path) = source_package_target_path {
+            if &target_path == source_package_target_path {
+                continue;
+            }
+        }
+        let target_uri = Url::from_file_path(&target_path);
+        if let Ok(target_uri) = target_uri {
+            if let Some(adl_files) = search_dirs.get(*package_root) {
+                if adl_files.contains(&target_uri) {
+                    return Some(target_uri);
+                }
+            }
+        }
+    }
+
     // NOTE(alex): the below checks are redundant as the lookup above should always succeed
-    for package_root in search_dirs.keys() {
+    for package_root in &package_roots {
         let target_path = package_root.join(format!("{}.adl", imported_module_path.join("/")));
         if let Some(ref source_package_target_path) = source_package_target_path {
             if &target_path == source_package_target_path {

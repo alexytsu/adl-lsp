@@ -44,7 +44,7 @@ impl AdlLanguageServerState {
         let parsed_tree = parser.parse(uri.clone(), &contents)?;
 
         debug!("collecting diagnostics on parse tree for {}", uri.path());
-        let diagnostics = parsed_tree.collect_diagnostics(&contents);
+        let mut diagnostics = parsed_tree.collect_diagnostics(&contents);
 
         let symbols = parsed_tree.collect_document_symbols(contents.as_bytes());
         let mut symbols_cache = self.symbols.write().expect("poisoned");
@@ -101,6 +101,15 @@ impl AdlLanguageServerState {
             contents.as_bytes(),
             &mut get_or_parse_document_tree,
         );
+
+        let invalid_import_diagnostics = self.import_manager.collect_invalid_import_diagnostics(
+            &package_root_to_adl_files,
+            uri,
+            &parsed_tree,
+            contents.as_bytes(),
+            &mut get_or_parse_document_tree,
+        );
+        diagnostics.extend(invalid_import_diagnostics);
 
         // Store document contents
         documents.insert(uri.clone(), contents);

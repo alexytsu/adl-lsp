@@ -4,6 +4,11 @@ use tree_sitter::{Node, TreeCursor};
 use crate::parser::ts_lsp_interop as ts_lsp;
 use crate::{node::NodeKind, parser::ParsedTree};
 
+enum ImportNavigation {
+    Module((String, String)),
+    Type,
+}
+
 /// Basic tree traversal methods for working with the tree-sitter parsed tree
 pub trait Tree {
     fn advance_cursor_to(cursor: &mut TreeCursor<'_>, nid: usize) -> bool;
@@ -117,8 +122,11 @@ impl ParsedTree {
         let node = self.get_node_at_position(pos)?;
 
         // Check if we're in an import declaration
-        if let Some(import_info) = self.get_module_from_import_at_position(&node, content) {
-            return Some(import_info);
+        if let Some(import_info) = self.get_module_from_import_at_position(&node, content, pos) {
+            match import_info {
+                ImportNavigation::Module(info) => return Some(info),
+                ImportNavigation::Type => return None,
+            }
         }
 
         // Check if we're in a scoped name (FQN)
@@ -134,18 +142,43 @@ impl ParsedTree {
         &'a self,
         node: &Node<'a>,
         content: &'a [u8],
-    ) -> Option<(String, String)> {
+        pos: &Position,
+    ) -> Option<ImportNavigation> {
         // Walk up the tree to find if we're in an import declaration
         let mut current = *node;
         while let Some(parent) = current.parent() {
             if NodeKind::is_import_declaration(&parent) {
                 if let Some(import_decl) = crate::node::AdlImportDeclaration::try_new(parent) {
+                    if matches!(
+                        import_decl,
+                        crate::node::AdlImportDeclaration::FullyQualified(_)
+                    ) {
+                        if let Some(import_path) = parent.child(1) {
+                            if let Some(scoped_name) = import_path.child(0) {
+                                if let Some((segment_index, parts)) =
+                                    Self::scoped_name_segment_index_at_position(
+                                        &scoped_name,
+                                        &current,
+                                        pos,
+                                        content,
+                                    )
+                                {
+                                    if segment_index + 1 == parts.len() {
+                                        // Cursor is on the imported type name; let identifier-based
+                                        // navigation handle goto definition instead of module navigation.
+                                        return Some(ImportNavigation::Type);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let source_module = self
                         .find_module_definition()
                         .map(|m| m.module_name(content).to_string())
                         .unwrap_or_default();
                     let module_path = import_decl.module_name(content).to_string();
-                    return Some((module_path, source_module));
+                    return Some(ImportNavigation::Module((module_path, source_module)));
                 }
             }
             current = parent;
@@ -164,53 +197,67 @@ impl ParsedTree {
         let mut current = *node;
         while let Some(parent) = current.parent() {
             if NodeKind::is_scoped_name(&parent) {
-                let scoped_text = parent.utf8_text(content).ok()?;
-
-                // Parse the scoped name to determine which part we clicked on
-                let parts: Vec<&str> = scoped_text.split('.').collect();
-                if parts.len() > 1 {
-                    // Convert cursor position to byte offset within the scoped name
-                    let cursor_point = ts_lsp::lsp_to_ts_point(pos);
-                    let scoped_start_point = parent.start_position();
-
-                    // Calculate relative byte offset within the scoped name text
-                    let relative_byte_offset = if cursor_point.row == scoped_start_point.row {
-                        cursor_point
-                            .column
-                            .saturating_sub(scoped_start_point.column)
-                    } else {
-                        // Multi-line case - use the current node's position
-                        let node_start = current.start_position();
-                        if node_start.row == scoped_start_point.row {
-                            node_start.column.saturating_sub(scoped_start_point.column)
-                        } else {
-                            0
-                        }
-                    };
-
-                    // Find which dot-separated segment we're in
-                    let mut current_offset = 0;
-                    for (i, part) in parts.iter().enumerate() {
-                        if relative_byte_offset >= current_offset
-                            && relative_byte_offset < current_offset + part.len()
-                        {
-                            // We're clicking on part i, so the module path is everything before this part
-                            if i > 0 {
-                                let module_path = parts[..i].join(".");
-                                let source_module = self
-                                    .find_module_definition()
-                                    .map(|m| m.module_name(content).to_string())
-                                    .unwrap_or_default();
-                                return Some((module_path, source_module));
-                            }
-                            break;
-                        }
-                        current_offset += part.len() + 1; // +1 for the dot
+                if let Some((segment_index, parts)) =
+                    Self::scoped_name_segment_index_at_position(&parent, &current, pos, content)
+                {
+                    if segment_index > 0 {
+                        let module_path = parts[..segment_index].join(".");
+                        let source_module = self
+                            .find_module_definition()
+                            .map(|m| m.module_name(content).to_string())
+                            .unwrap_or_default();
+                        return Some((module_path, source_module));
                     }
                 }
             }
             current = parent;
         }
+        None
+    }
+
+    fn scoped_name_segment_index_at_position(
+        scoped_node: &Node<'_>,
+        current: &Node<'_>,
+        pos: &Position,
+        content: &[u8],
+    ) -> Option<(usize, Vec<String>)> {
+        let scoped_text = scoped_node.utf8_text(content).ok()?;
+
+        let parts: Vec<String> = scoped_text.split('.').map(str::to_string).collect();
+        if parts.len() <= 1 {
+            return None;
+        }
+
+        // Convert cursor position to byte offset within the scoped name
+        let cursor_point = ts_lsp::lsp_to_ts_point(pos);
+        let scoped_start_point = scoped_node.start_position();
+
+        // Calculate relative byte offset within the scoped name text
+        let relative_byte_offset = if cursor_point.row == scoped_start_point.row {
+            cursor_point
+                .column
+                .saturating_sub(scoped_start_point.column)
+        } else {
+            // Multi-line case - use the current node's position
+            let node_start = current.start_position();
+            if node_start.row == scoped_start_point.row {
+                node_start.column.saturating_sub(scoped_start_point.column)
+            } else {
+                0
+            }
+        };
+
+        // Find which dot-separated segment we're in
+        let mut current_offset = 0;
+        for (i, part) in parts.iter().enumerate() {
+            if relative_byte_offset >= current_offset
+                && relative_byte_offset < current_offset + part.len()
+            {
+                return Some((i, parts));
+            }
+            current_offset += part.len() + 1; // +1 for the dot
+        }
+
         None
     }
 }
@@ -249,6 +296,14 @@ mod tests {
         } else {
             panic!("Expected to find module path in import declaration");
         }
+
+        // Test clicking on "User" in "import common.db.User;" should not navigate to module
+        let position = Position {
+            line: 1,
+            character: 22,
+        }; // Points to "User"
+        let result = tree.get_module_path_at(&position, contents.as_bytes());
+        assert!(result.is_none());
     }
 
     #[test]

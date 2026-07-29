@@ -955,8 +955,14 @@ impl Server {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
+        debug!(
+            "completion request: uri={}, line={}, character={}",
+            uri, position.line, position.character
+        );
+
         // Get the document content
         let Some((_tree, content)) = self.get_or_parse_document_with_content(&uri) else {
+            debug!("completion skipped: no content available for {}", uri);
             return Ok(None);
         };
 
@@ -986,8 +992,14 @@ impl Server {
         let text_before_cursor =
             &current_line_text[..position.character.min(current_line_text.len() as u32) as usize];
 
+        trace!(
+            "completion context: line_text={:?}, text_before_cursor={:?}",
+            current_line_text, text_before_cursor
+        );
+
         // Check if we're in an import statement
         if !text_before_cursor.trim_start().starts_with("import") {
+            debug!("completion skipped: not in import statement");
             return Ok(None);
         }
 
@@ -995,6 +1007,12 @@ impl Server {
         let imports_cache = self.state.get_imports_cache();
         let (module_suggestions, type_suggestions) =
             imports_cache.get_import_completions(text_before_cursor);
+
+        debug!(
+            "completion suggestions: modules={}, types={}",
+            module_suggestions.len(),
+            type_suggestions.len()
+        );
 
         let mut completion_items = Vec::new();
 
@@ -1025,6 +1043,7 @@ impl Server {
         }
 
         if completion_items.is_empty() {
+            debug!("completion result empty for {}", uri);
             Ok(None)
         } else {
             Ok(Some(CompletionResponse::List(CompletionList {

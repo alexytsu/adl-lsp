@@ -1,8 +1,9 @@
 use async_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
+use std::collections::HashSet;
 use tracing::debug;
 use tree_sitter::Node;
 
-use crate::node::{AdlModuleBody, NodeKind};
+use crate::node::{AdlImportDeclaration, AdlModuleBody, NodeKind};
 use crate::parser::tree::Tree;
 use crate::parser::ts_lsp_interop::ts_to_lsp_position;
 
@@ -24,7 +25,7 @@ impl ParsedTree {
         self.collect_parse_diagnostics_missing(&mut diagnostics);
 
         // then collect custom semantic errors
-        if let Some(import_diagnostics) = self.collect_import_diagnostics() {
+        if let Some(import_diagnostics) = self.collect_import_diagnostics(content.as_bytes()) {
             diagnostics.extend(import_diagnostics);
         }
         diagnostics.extend(self.collect_missing_semicolon_diagnostics());
@@ -106,7 +107,7 @@ impl ParsedTree {
             .collect()
     }
 
-    pub fn collect_import_diagnostics(&self) -> Option<Vec<Diagnostic>> {
+    pub fn collect_import_diagnostics(&self, content: &[u8]) -> Option<Vec<Diagnostic>> {
         let imports = self.find_all_nodes(NodeKind::is_import_declaration);
 
         let module_body = AdlModuleBody::try_new(self.find_first_node(NodeKind::is_module_body)?)?;
@@ -125,25 +126,60 @@ impl ParsedTree {
             }
         }
 
-        let first_non_import = first_non_import?;
+        let out_of_order_imports: Vec<Diagnostic> = if let Some(first_non_import) = first_non_import
+        {
+            imports
+                .iter()
+                .filter_map(|node| {
+                    // imports should only be at the top of a module
+                    if node.start_position() > first_non_import.start_position() {
+                        Some(Diagnostic {
+                            range: Range {
+                                start: ts_to_lsp_position(&node.start_position()),
+                                end: ts_to_lsp_position(&node.end_position()),
+                            },
+                            message: "imports must be declared at the beginning of a module"
+                                .to_string(),
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            ..Default::default()
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
-        let out_of_order_imports = imports
+        let mut seen_imports = HashSet::new();
+        let duplicate_imports: Vec<Diagnostic> = imports
             .iter()
             .filter_map(|node| {
-                // imports should only be at the top of a module
-                if node.start_position() > first_non_import.start_position() {
+                let import_decl = AdlImportDeclaration::try_new(*node)?;
+                let key = match import_decl {
+                    AdlImportDeclaration::FullyQualified(_) => {
+                        let module = import_decl.module_name(content);
+                        let type_name = import_decl.imported_type_name(content).unwrap_or_default();
+                        format!("{module}.{type_name}")
+                    }
+                    AdlImportDeclaration::StarImport(_) => {
+                        format!("{}.*", import_decl.module_name(content))
+                    }
+                };
+
+                if seen_imports.insert(key) {
+                    None
+                } else {
                     Some(Diagnostic {
                         range: Range {
                             start: ts_to_lsp_position(&node.start_position()),
                             end: ts_to_lsp_position(&node.end_position()),
                         },
-                        message: "imports must be declared at the beginning of a module"
-                            .to_string(),
-                        severity: Some(DiagnosticSeverity::ERROR),
+                        message: "duplicate import".to_string(),
+                        severity: Some(DiagnosticSeverity::WARNING),
                         ..Default::default()
                     })
-                } else {
-                    None
                 }
             })
             .collect();
@@ -151,7 +187,10 @@ impl ParsedTree {
         // TODO(med): attempt to resolve imports and report errors for invalid imports
         // TODO(med): check for unused or duplicate imports
 
-        Some(out_of_order_imports)
+        let mut diagnostics = out_of_order_imports;
+        diagnostics.extend(duplicate_imports);
+
+        Some(diagnostics)
     }
 }
 
