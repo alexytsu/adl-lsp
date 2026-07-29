@@ -261,48 +261,61 @@ impl ParsedTree {
         None
     }
 
-    /// If the cursor is on the identifier of a `field_reference` inside an `annotation_declaration`
-    /// (e.g. the `title` in `annotation Message::title Doc "...";`), resolve it to the referenced
-    /// field's definition.
+    /// If the cursor is inside the `field:` name of an `annotation_declaration`
+    /// (e.g. the `title` in `annotation Message::title Doc "...";`), return the annotation's
+    /// target type (possibly qualified, e.g. `common.db.User`) and the referenced field name.
     ///
-    /// Only locally-defined, unqualified target types are resolved for now; qualified/imported
-    /// target types (e.g. `common.db.User::field`) return `None` and fall through to the caller.
+    /// The caller decides how to resolve the target: locally via
+    /// [`Self::find_field_definition_in_type`], or through the workspace import table for
+    /// qualified/imported targets.
+    pub fn get_annotation_field_reference_at<'a>(
+        &'a self,
+        pos: &Position,
+        content: &'a [u8],
+    ) -> Option<(&'a str, &'a str)> {
+        let node = self.get_node_at_position(pos)?;
+        // The cursor may be on the `field_name` node itself or its inner `identifier`.
+        let field_name_node = if NodeKind::is_field_name(&node) {
+            node
+        } else {
+            node.parent().filter(NodeKind::is_field_name)?
+        };
+        let annotation = field_name_node
+            .parent()
+            .filter(NodeKind::is_annotation_declaration)?;
+
+        // Only the annotation's `field:` slot references a field; ignore other field_names.
+        if annotation.child_by_field_name("field").map(|n| n.id()) != Some(field_name_node.id()) {
+            return None;
+        }
+
+        let target_type = annotation
+            .child_by_field_name("target")?
+            .utf8_text(content)
+            .ok()?;
+        let field_name = field_name_node.utf8_text(content).ok()?;
+
+        Some((target_type, field_name))
+    }
+
+    /// Resolve an annotation field reference at `pos` against types defined in this file only.
+    /// Qualified targets (`a.b.Type::field`) return `None`; the server layer resolves those
+    /// through the import table.
     pub fn get_annotation_field_definition_at<'a>(
         &'a self,
         pos: &Position,
         content: &'a [u8],
     ) -> Option<Location> {
-        let node = self.get_node_at_position(pos)?;
-        if !NodeKind::is_identifier(&node) {
-            return None;
-        }
-
-        let field_reference = node.parent().filter(NodeKind::is_field_reference)?;
-        let annotation = field_reference
-            .parent()
-            .filter(NodeKind::is_annotation_declaration)?;
-        let field_name = node.utf8_text(content).ok()?;
-
-        // The first scoped_name child of the annotation is its target type.
-        let mut cursor = annotation.walk();
-        let target_type = annotation
-            .children(&mut cursor)
-            .find(|child| NodeKind::is_scoped_name(child))?
-            .utf8_text(content)
-            .ok()?;
-
-        // TODO(low): resolve qualified/imported annotation targets via the import table (would
-        // require threading the server's import resolution into this path).
+        let (target_type, field_name) = self.get_annotation_field_reference_at(pos, content)?;
         if target_type.contains('.') {
             return None;
         }
-
         self.find_field_definition_in_type(target_type, field_name, content)
     }
 
     /// Find the definition location of a field named `field_name` within a locally-defined
     /// struct/union named `type_name`.
-    fn find_field_definition_in_type<'a>(
+    pub fn find_field_definition_in_type<'a>(
         &'a self,
         type_name: &str,
         field_name: &str,
@@ -314,13 +327,7 @@ impl ParsedTree {
             }
 
             for field in self.find_all_nodes_from(definition, NodeKind::is_field) {
-                // The field's name is its direct `identifier` child (the type_expression comes
-                // before it and is a distinct node kind).
-                let mut field_cursor = field.walk();
-                let Some(name_node) = field
-                    .children(&mut field_cursor)
-                    .find(NodeKind::is_identifier)
-                else {
+                let Some(name_node) = field.child_by_field_name("name") else {
                     continue;
                 };
                 if name_node.utf8_text(content).ok() == Some(field_name) {

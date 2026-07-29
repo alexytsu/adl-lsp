@@ -14,12 +14,13 @@ pub enum NodeKind {
     Identifier,
     ScopedName,
     TypeName,
+    FieldName,
+    Version,
 
     // Type System
     TypeParameters,
     TypeArguments,
     TypeExpression,
-    PrimitiveType,
 
     // Type Definitions
     TypeDefinition,
@@ -36,10 +37,8 @@ pub enum NodeKind {
     ImportPath,
 
     // Annotations
-    Annotation,
-    Annotations,
+    AnnotationDecorator,
     AnnotationDeclaration,
-    FieldReference,
 
     // JSON
     JsonValue,
@@ -98,12 +97,13 @@ impl NodeKind {
             "identifier" => Self::Identifier,
             "scoped_name" => Self::ScopedName,
             "type_name" => Self::TypeName,
+            "field_name" => Self::FieldName,
+            "version" => Self::Version,
 
             // Type System
             "type_parameters" => Self::TypeParameters,
             "type_arguments" => Self::TypeArguments,
             "type_expression" => Self::TypeExpression,
-            "primitive_type" => Self::PrimitiveType,
 
             // Type Definitions
             "type_definition" => Self::TypeDefinition,
@@ -120,10 +120,8 @@ impl NodeKind {
             "import_path" => Self::ImportPath,
 
             // Annotations
-            "annotation" => Self::Annotation,
-            "annotations" => Self::Annotations,
+            "annotation_decorator" => Self::AnnotationDecorator,
             "annotation_declaration" => Self::AnnotationDeclaration,
-            "field_reference" => Self::FieldReference,
 
             // JSON
             "json_value" => Self::JsonValue,
@@ -149,12 +147,13 @@ impl NodeKind {
             Self::Identifier => "identifier",
             Self::ScopedName => "scoped_name",
             Self::TypeName => "type_name",
+            Self::FieldName => "field_name",
+            Self::Version => "version",
 
             // Type System
             Self::TypeParameters => "type_parameters",
             Self::TypeArguments => "type_arguments",
             Self::TypeExpression => "type_expression",
-            Self::PrimitiveType => "primitive_type",
 
             // Type Definitions
             Self::TypeDefinition => "type_definition",
@@ -171,10 +170,8 @@ impl NodeKind {
             Self::ImportPath => "import_path",
 
             // Annotations
-            Self::Annotation => "annotation",
-            Self::Annotations => "annotations",
+            Self::AnnotationDecorator => "annotation_decorator",
             Self::AnnotationDeclaration => "annotation_declaration",
-            Self::FieldReference => "field_reference",
 
             // JSON
             Self::JsonValue => "json_value",
@@ -215,6 +212,14 @@ impl NodeKind {
         n.kind() == Self::TypeName.as_str()
     }
 
+    pub fn is_field_name(n: &Node) -> bool {
+        n.kind() == Self::FieldName.as_str()
+    }
+
+    pub fn is_version(n: &Node) -> bool {
+        n.kind() == Self::Version.as_str()
+    }
+
     // Type System
     pub fn is_type_parameters(n: &Node) -> bool {
         n.kind() == Self::TypeParameters.as_str()
@@ -226,10 +231,6 @@ impl NodeKind {
 
     pub fn is_type_arguments(n: &Node) -> bool {
         n.kind() == Self::TypeArguments.as_str()
-    }
-
-    pub fn is_primitive_type(n: &Node) -> bool {
-        n.kind() == Self::PrimitiveType.as_str()
     }
 
     // Type Definitions
@@ -275,20 +276,12 @@ impl NodeKind {
     }
 
     // Annotations
-    pub fn is_annotation(n: &Node) -> bool {
-        n.kind() == Self::Annotation.as_str()
-    }
-
-    pub fn is_annotations(n: &Node) -> bool {
-        n.kind() == Self::Annotations.as_str()
+    pub fn is_annotation_decorator(n: &Node) -> bool {
+        n.kind() == Self::AnnotationDecorator.as_str()
     }
 
     pub fn is_annotation_declaration(n: &Node) -> bool {
         n.kind() == Self::AnnotationDeclaration.as_str()
-    }
-
-    pub fn is_field_reference(n: &Node) -> bool {
-        n.kind() == Self::FieldReference.as_str()
     }
 
     // JSON
