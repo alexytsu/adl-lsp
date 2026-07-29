@@ -9,6 +9,8 @@ license = "MIT"
 anyhow = "1.0"
 async-lsp = { version = "0.2.2", features = ["tokio"] }
 clap = { version = "4.5.39", features = ["derive"] }
+# pinned: ignore >= 0.4.24 requires a newer rustc (let-chains) than the project toolchain (1.85)
+ignore = "=0.4.23"
 lsp-types = "0.95.1"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.141"

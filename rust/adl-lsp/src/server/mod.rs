@@ -335,33 +335,25 @@ impl Server {
         Ok(resolved_roots)
     }
 
-    /// Recursively discover .adl files in a directory
+    /// Discover .adl files in a directory tree, honouring `.gitignore`/`.ignore` and hidden-file
+    /// rules via the `ignore` crate (the same walker ripgrep uses).
     fn discover_adl_files_recursive(dir: &PathBuf, adl_files: &mut HashSet<PathBuf>) {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
+        // `ignore` applies `.gitignore`, `.ignore`, global gitignore and hidden-file filtering by
+        // default. `require_git(false)` keeps `.gitignore` honoured even outside a git repo.
+        let walker = ignore::WalkBuilder::new(dir).require_git(false).build();
 
-                if path.is_dir() {
-                    // Skip hidden directories and common build/output directories
-                    // TODO(med): look for .gitignore files and also ignore them
-                    if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                        if !dir_name.starts_with('.')
-                            && dir_name != "target"
-                            && dir_name != "node_modules"
-                            && dir_name != "dist"
-                            && dir_name != "build"
-                        {
-                            Self::discover_adl_files_recursive(&path, adl_files);
-                        }
-                    }
-                } else if path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .is_some_and(|ext| ext.to_lowercase().contains("adl"))
-                {
-                    debug!("found ADL file: {}", path.display());
-                    adl_files.insert(path);
-                }
+        for entry in walker.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.to_lowercase().contains("adl"))
+            {
+                debug!("found ADL file: {}", path.display());
+                adl_files.insert(path.to_path_buf());
             }
         }
     }
@@ -1156,6 +1148,31 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_discovery_honours_gitignore() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        fs::write(root.join("main.adl"), "module main {};").unwrap();
+
+        // A gitignored build directory containing an ADL file that must be skipped.
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(root.join("build/generated.adl"), "module generated {};").unwrap();
+        fs::write(root.join(".gitignore"), "build/\n").unwrap();
+
+        // A hidden directory is skipped by default.
+        fs::create_dir_all(root.join(".hidden")).unwrap();
+        fs::write(root.join(".hidden/secret.adl"), "module secret {};").unwrap();
+
+        let mut adl_files = HashSet::new();
+        Server::discover_adl_files_recursive(&root.to_path_buf(), &mut adl_files);
+
+        assert!(adl_files.contains(&root.join("main.adl")));
+        assert!(!adl_files.contains(&root.join("build/generated.adl")));
+        assert!(!adl_files.contains(&root.join(".hidden/secret.adl")));
+        assert_eq!(adl_files.len(), 1);
+    }
 
     #[test]
     fn test_circular_dependency_detection() {
