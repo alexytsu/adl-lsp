@@ -629,9 +629,19 @@ impl Server {
         }
 
         // Annotation field references (e.g. `title` in `annotation Message::title Doc "...";`)
-        // resolve to the field definition rather than a scoped_name type.
-        if let Some(location) = tree.get_annotation_field_definition_at(&position, content) {
-            return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+        // resolve to the field definition rather than a scoped_name type. The target type may
+        // be local, imported, or fully qualified.
+        if let Some((target_type, field_name)) =
+            tree.get_annotation_field_reference_at(&position, content)
+        {
+            let target_type = target_type.to_string();
+            let field_name = field_name.to_string();
+            return self.resolve_annotation_field_definition(
+                &tree,
+                content,
+                &target_type,
+                &field_name,
+            );
         }
 
         // Fall back to the original identifier-based navigation
@@ -687,6 +697,63 @@ impl Server {
             }
             None => Ok(None),
         }
+    }
+
+    /// Resolve an annotation declaration's `Target::field` reference to the field's definition.
+    ///
+    /// Local unqualified targets resolve within the current tree; qualified targets
+    /// (`a.b.Type::field`) and unqualified-but-imported targets resolve through the workspace
+    /// import table to the defining file.
+    fn resolve_annotation_field_definition(
+        &mut self,
+        tree: &ParsedTree,
+        content: &[u8],
+        target_type: &str,
+        field_name: &str,
+    ) -> Result<Option<GotoDefinitionResponse>, ResponseError> {
+        // Unqualified target defined in this file.
+        if !target_type.contains('.') {
+            if let Some(location) =
+                tree.find_field_definition_in_type(target_type, field_name, content)
+            {
+                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+            }
+        }
+
+        // Qualified (`a.b.Type`) or imported target: work out the target type's module, then
+        // resolve to the defining document via the import table.
+        let (module_name, type_name) = match target_type.rfind('.') {
+            Some(pos) => (
+                target_type[..pos].to_string(),
+                target_type[pos + 1..].to_string(),
+            ),
+            None => match tree.definition(target_type, content) {
+                Some(DefinitionLocation::Import(unresolved)) => (
+                    unresolved.target_module_path.join("."),
+                    target_type.to_string(),
+                ),
+                _ => {
+                    debug!(
+                        "annotation target '{}' not resolvable locally or via imports",
+                        target_type
+                    );
+                    return Ok(None);
+                }
+            },
+        };
+
+        let location = self.resolve_import_from_table(
+            &Fqn::from_module_name_and_type_name(&module_name, &type_name),
+            |target_tree, target_contents| {
+                Ok(target_tree.find_field_definition_in_type(
+                    &type_name,
+                    field_name,
+                    target_contents.as_bytes(),
+                ))
+            },
+        )?;
+
+        Ok(location.map(GotoDefinitionResponse::Scalar))
     }
 
     /// Handle navigation to a module file

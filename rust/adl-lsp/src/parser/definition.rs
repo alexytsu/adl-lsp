@@ -42,9 +42,10 @@ impl Definition for ParsedTree {
     }
 }
 
-// Goto for annotation field references (`annotation Type::field ...`) is handled in
-// `tree::get_annotation_field_definition_at`, wired into the server's goto-definition handler.
-// It currently resolves locally-defined target types; qualified/imported targets are a follow-up.
+// Goto for annotation field references (`annotation Type::field ...`) is handled by
+// `tree::get_annotation_field_reference_at` plus the server's
+// `resolve_annotation_field_definition`, which resolves local, qualified and imported targets
+// through the workspace import table.
 impl ParsedTree {
     pub fn is_from_definition(node: &Node<'_>) -> bool {
         let mut current = *node;
