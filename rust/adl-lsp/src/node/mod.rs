@@ -33,6 +33,16 @@ pub fn definition_version<'b>(node: &Node<'_>, content: &'b [u8]) -> Option<&'b 
         .and_then(|version_node| version_node.utf8_text(content).ok())
 }
 
+/// Numeric version of the declaration named by `type_name_node` (the `2` in `struct X#2`),
+/// or `None` when the declaration is unversioned.
+pub fn declaration_version_number(type_name_node: &Node<'_>, content: &[u8]) -> Option<u64> {
+    let declaration = type_name_node.parent()?;
+    definition_version(&declaration, content)?
+        .strip_prefix('#')?
+        .parse()
+        .ok()
+}
+
 /// Type-safe helpers to perform operations on known-node types
 #[allow(dead_code)]
 pub enum AdlNode<'a> {

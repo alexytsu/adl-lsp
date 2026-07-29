@@ -31,10 +31,13 @@ fn import_diagnostic(node: &Node<'_>, message: String) -> Diagnostic {
 /// A table that caches resolved imports to avoid repeated tree traversals
 #[derive(Debug, Clone, Default)]
 pub struct ImportsCache {
-    /// Maps FQN -> target_uri where the symbol is defined
-    /// Since ADL workspaces cannot have duplicate symbol definitions,
-    /// each identifier maps to exactly one location
-    definition_locations: Arc<RwLock<HashMap<Fqn, Url>>>,
+    /// Maps FQN -> the set of target_uris where the symbol is defined.
+    ///
+    /// An `Fqn` is `(module, name)` — versioned declarations (`struct X#1` / `struct X#2`)
+    /// share one Fqn, and transiently-inconsistent workspaces can define the same Fqn in more
+    /// than one file, so a single Fqn may map to multiple locations. Goto-definition picks one
+    /// deterministically via [`ImportsCache::lookup_fqn`].
+    definition_locations: Arc<RwLock<HashMap<Fqn, HashSet<Url>>>>,
 
     /// Maps source_uri -> set of all FQNs it imports
     /// Used for efficient invalidation when a document changes
@@ -52,12 +55,16 @@ impl ImportsCache {
         self.defined_symbols.write().expect("poisoned").clear();
     }
 
-    /// Attempt to lookup the uri where an identifier is defined
+    /// Attempt to lookup a uri where an identifier is defined.
+    ///
+    /// When multiple files define the same Fqn (transiently possible mid-edit), the
+    /// lexicographically smallest uri is returned so the choice is deterministic.
     pub fn lookup_fqn(&self, fqn: &Fqn) -> Option<Url> {
         self.definition_locations
             .read()
             .expect("poisoned")
             .get(fqn)
+            .and_then(|uris| uris.iter().min_by_key(|uri| uri.as_str()))
             .cloned()
     }
 
@@ -342,7 +349,10 @@ impl ImportsCache {
         let mut imported_symbols = self.imported_symbols.write().expect("poisoned");
         let mut defined_symbols = self.defined_symbols.write().expect("poisoned");
 
-        definition_locations.insert(fqn.clone(), target_uri.clone());
+        definition_locations
+            .entry(fqn.clone())
+            .or_default()
+            .insert(target_uri.clone());
         imported_symbols
             .entry(source_uri.clone())
             .or_default()
@@ -358,7 +368,10 @@ impl ImportsCache {
         let mut definition_locations = self.definition_locations.write().expect("poisoned");
         let mut defined_symbols = self.defined_symbols.write().expect("poisoned");
 
-        definition_locations.insert(fqn.clone(), source_uri.clone());
+        definition_locations
+            .entry(fqn.clone())
+            .or_default()
+            .insert(source_uri.clone());
         defined_symbols
             .entry(source_uri.clone())
             .or_default()
@@ -382,9 +395,15 @@ impl ImportsCache {
         // Remove the definition cache for this source
         let definitions = { definition_table.remove(source_uri).unwrap_or_default() };
 
-        // Remove the definition locations for all symbols in this source
+        // Remove this source's contribution to each symbol's definition locations. Another
+        // file's definition of the same Fqn (if any) must survive the invalidation.
         for identifier in definitions {
-            definition_locations.remove(&identifier);
+            if let Some(uris) = definition_locations.get_mut(&identifier) {
+                uris.remove(source_uri);
+                if uris.is_empty() {
+                    definition_locations.remove(&identifier);
+                }
+            }
         }
     }
 }

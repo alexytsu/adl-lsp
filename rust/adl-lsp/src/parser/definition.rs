@@ -83,7 +83,7 @@ impl ParsedTree {
             return None;
         }
 
-        let mut locations: Vec<DefinitionLocation> = self
+        let mut candidates: Vec<Node> = self
             .find_all_nodes_from(n, NodeKind::is_user_defined_name)
             .into_iter()
             .filter(|n| n.utf8_text(content).expect("utf-8 parse error") == identifier)
@@ -92,6 +92,17 @@ impl ParsedTree {
                 let is_from_import = Self::find_import_declaration(n).is_some();
                 is_from_import || (is_from_definition && !NodeKind::is_identifier(n))
             })
+            .collect();
+
+        // Versioned declarations (`struct X#1` / `struct X#2`) all match by name; the highest
+        // version wins for goto-definition. Unversioned declarations and imports rank equally
+        // (stable sort preserves their original order).
+        candidates.sort_by_key(|n| {
+            std::cmp::Reverse(crate::node::declaration_version_number(n, content).unwrap_or(0))
+        });
+
+        let mut locations: Vec<DefinitionLocation> = candidates
+            .into_iter()
             .map(|n| {
                 if let Some(import_node) = Self::find_import_declaration(&n) {
                     DefinitionKind::Import(import_node, identifier.into())
@@ -175,6 +186,23 @@ impl ParsedTree {
                 })
             }
         }
+    }
+
+    /// Locations of every declaration name matching `identifier` in this file — all versions of
+    /// a versioned declaration (`struct X#1` / `struct X#2`), not just the winning one.
+    /// Used by rename/references so every version is covered.
+    pub fn definition_name_locations(&self, identifier: &str, content: &[u8]) -> Vec<Location> {
+        self.find_all_nodes(NodeKind::is_type_name)
+            .into_iter()
+            .filter(|n| n.utf8_text(content).ok() == Some(identifier))
+            .map(|n| Location {
+                uri: self.uri.clone(),
+                range: Range {
+                    start: ts_lsp_interop::ts_to_lsp_position(&n.start_position()),
+                    end: ts_lsp_interop::ts_to_lsp_position(&n.end_position()),
+                },
+            })
+            .collect()
     }
 
     pub fn get_source_module(node: &Node<'_>, content: &[u8]) -> Option<String> {

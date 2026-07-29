@@ -876,11 +876,9 @@ impl Server {
             }
         }
 
-        // Also include the definition if it's in the current file
-        let definition_location = tree.definition(identifier, contents);
-        if let Some(DefinitionLocation::Resolved(location)) = definition_location {
-            all_references.push(location);
-        }
+        // Also include the definitions if they're in the current file — every version of a
+        // versioned declaration must be renamed, not just the highest.
+        all_references.extend(tree.definition_name_locations(identifier, contents));
 
         debug!(
             "Total references found for rename: {}",
@@ -989,12 +987,9 @@ impl Server {
             }
         }
 
-        // Include definition if requested
+        // Include definitions if requested — all versions of a versioned declaration.
         if params.context.include_declaration {
-            let definition_location = tree.definition(identifier, contents);
-            if let Some(DefinitionLocation::Resolved(location)) = definition_location {
-                all_references.push(location);
-            }
+            all_references.extend(tree.definition_name_locations(identifier, contents));
         }
 
         debug!("Total references found: {}", all_references.len());
