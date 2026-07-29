@@ -179,7 +179,7 @@ impl ParsedTree {
     pub fn get_source_module(node: &Node<'_>, content: &[u8]) -> Option<String> {
         if NodeKind::is_module_definition(node) {
             return node
-                .child(1)
+                .child_by_field_name("name")
                 .and_then(|child| child.utf8_text(content).ok())
                 .map(String::from);
         }

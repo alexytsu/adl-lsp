@@ -84,12 +84,12 @@ impl ParsedTree {
         let selection_range = Self::extract_selection_range(node).unwrap_or(range);
 
         // unknown would be a bug, but don't panic here
-        let name = Self::extract_symbol_name(node, content).unwrap_or("unknown");
+        let name = Self::extract_symbol_name(node, content).unwrap_or_else(|| "unknown".into());
         let detail = Self::extract_details(node, content);
 
         #[allow(deprecated)]
         Some(DocumentSymbol {
-            name: name.to_string(),
+            name,
             detail,
             kind: symbol_kind,
             tags: None,
@@ -100,18 +100,33 @@ impl ParsedTree {
         })
     }
 
-    /**
-     * Extract the symbol name from the node which is the identifier node
-     * Recursively searches through the node's children until an identifier is found
-     */
-    fn extract_symbol_name<'a>(node: &Node<'a>, content: &'a [u8]) -> Option<&'a str> {
+    /// Extract the symbol's display name.
+    ///
+    /// Named declarations expose their name via the grammar's `name:` field; versioned
+    /// declarations (`struct X#2 { ... }`) render as `X#2`. Nodes without a `name:` field fall
+    /// back to the first identifier/scoped_name found in a child walk.
+    fn extract_symbol_name(node: &Node<'_>, content: &[u8]) -> Option<String> {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            let name = name_node.utf8_text(content).ok()?;
+            // Versioned decls render as `X#2` (the version text includes the leading `#`).
+            return match crate::node::definition_version(node, content) {
+                Some(version) => Some(format!("{name}{version}")),
+                None => Some(name.to_string()),
+            };
+        }
+
+        Self::find_first_name_text(node, content).map(str::to_string)
+    }
+
+    /// Fallback name extraction: recursively search for the first identifier or scoped_name.
+    fn find_first_name_text<'a>(node: &Node<'a>, content: &'a [u8]) -> Option<&'a str> {
         let mut cursor = node.walk();
 
         for child in node.children(&mut cursor) {
             if NodeKind::is_identifier(&child) || NodeKind::is_scoped_name(&child) {
                 return child.utf8_text(content).ok();
             }
-            if let Some(name) = Self::extract_symbol_name(&child, content) {
+            if let Some(name) = Self::find_first_name_text(&child, content) {
                 return Some(name);
             }
         }
@@ -120,30 +135,29 @@ impl ParsedTree {
     }
 
     fn extract_details(node: &Node<'_>, content: &[u8]) -> Option<String> {
-        if NodeKind::is_type_definition(node) || NodeKind::is_newtype_definition(node) {
-            let mut cursor = node.walk();
-            // walk the children till the `type_expression` node
-            for child in node.children(&mut cursor) {
-                if NodeKind::is_type_expression(&child) {
-                    return Some(child.utf8_text(content).ok().unwrap().to_string());
-                }
-            }
-        } else if NodeKind::is_field(node) {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if NodeKind::is_type_expression(&child) {
-                    return Some(child.utf8_text(content).ok().unwrap().to_string());
-                }
-            }
+        // `type X = <type>`, `newtype X = <type>` and `<type> fieldName` all expose the
+        // type expression via the grammar's `type:` field.
+        if NodeKind::is_type_definition(node)
+            || NodeKind::is_newtype_definition(node)
+            || NodeKind::is_field(node)
+        {
+            return node
+                .child_by_field_name("type")
+                .and_then(|type_node| type_node.utf8_text(content).ok())
+                .map(str::to_string);
         }
 
         None
     }
 
     fn extract_selection_range(node: &Node<'_>) -> Option<Range> {
-        // Find the identifier node for the selection range
-        let mut cursor = node.walk();
+        // The declaration's own name (via the grammar's `name:` field) is the selection range.
+        if let Some(name_node) = node.child_by_field_name("name") {
+            return Some(ts_lsp_interop::ts_to_lsp_range(&name_node.range()));
+        }
 
+        // Fallback: descend first children looking for an identifier.
+        let mut cursor = node.walk();
         if let Some(child) = node.children(&mut cursor).next() {
             if NodeKind::is_identifier(&child) {
                 return Some(ts_lsp_interop::ts_to_lsp_range(&child.range()));

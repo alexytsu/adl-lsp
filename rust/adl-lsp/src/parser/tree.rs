@@ -100,6 +100,39 @@ impl Tree for ParsedTree {
 }
 
 impl ParsedTree {
+    /// True when `node` is (or is part of) a `scoped_name` sitting in a `type_expression`'s
+    /// `name:` slot whose text is an ADL primitive (`String`, `Vector`, ...).
+    ///
+    /// Grammar v0.7 has no dedicated `primitive_type` node — primitives parse as ordinary
+    /// scoped names — so this is the replacement check: primitives have no user definition and
+    /// goto-definition/hover lookups should skip them. A *field* named `String` is legal ADL
+    /// and is not a type reference, so it is not matched here.
+    pub fn is_primitive_type_reference(node: &Node<'_>, content: &[u8]) -> bool {
+        let scoped_name = if NodeKind::is_scoped_name(node) {
+            *node
+        } else {
+            match node.parent() {
+                Some(parent) if NodeKind::is_scoped_name(&parent) => parent,
+                _ => return false,
+            }
+        };
+
+        let Some(type_expression) = scoped_name.parent() else {
+            return false;
+        };
+        if !NodeKind::is_type_expression(&type_expression) {
+            return false;
+        }
+        if type_expression.child_by_field_name("name").map(|n| n.id()) != Some(scoped_name.id()) {
+            return false;
+        }
+
+        scoped_name
+            .utf8_text(content)
+            .ok()
+            .is_some_and(crate::parser::primitives::is_primitive)
+    }
+
     pub fn get_identifier_at<'a>(
         &'a self,
         pos: &Position,
@@ -153,8 +186,12 @@ impl ParsedTree {
                         import_decl,
                         crate::node::AdlImportDeclaration::FullyQualified(_)
                     ) {
-                        if let Some(import_path) = parent.child(1) {
-                            if let Some(scoped_name) = import_path.child(0) {
+                        if let Some(import_path) = parent.child_by_field_name("path") {
+                            let mut path_cursor = import_path.walk();
+                            if let Some(scoped_name) = import_path
+                                .children(&mut path_cursor)
+                                .find(NodeKind::is_scoped_name)
+                            {
                                 if let Some((segment_index, parts)) =
                                     Self::scoped_name_segment_index_at_position(
                                         &scoped_name,

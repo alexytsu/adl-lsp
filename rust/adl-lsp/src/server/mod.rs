@@ -567,9 +567,15 @@ impl Server {
         };
 
         let contents = contents.as_bytes();
-        let Some((identifier, _node)) = tree.get_identifier_at(&position, contents) else {
+        let Some((identifier, node)) = tree.get_identifier_at(&position, contents) else {
             return Ok(None);
         };
+
+        // Primitive types (`String`, `Vector`, ...) have no user definition to hover.
+        if ParsedTree::is_primitive_type_reference(&node, contents) {
+            return Ok(None);
+        }
+
         let definition_location = tree.definition(identifier, contents);
 
         let mut hover_items = tree.hover(identifier, contents);
@@ -635,6 +641,11 @@ impl Server {
 
         // identifiers appearing in scoped names reference a type_definition elsewhere
         if !NodeKind::has_scoped_name_parent(&node) {
+            return Ok(None);
+        }
+
+        // Primitive types (`String`, `Vector`, ...) have no user definition to jump to.
+        if ParsedTree::is_primitive_type_reference(&node, content) {
             return Ok(None);
         }
 
