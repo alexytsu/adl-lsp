@@ -42,11 +42,14 @@ impl ParsedTree {
             .for_each(|n| v.extend(self.get_hover_text(n.id(), content.as_ref())));
     }
 
-    // HACK: since the doccomments are themselves valid ADL and are part of the definition node,
-    // we can just return the entire definition node as the hover text with LanguageString for sensible highlighting
-    // though this might need some coordination and restructuring of the tree-sitter grammar
-    // TODO(low): we should return the doccomments as a MarkedString::String and the definition text as a MarkedString::LanguageString
+    /// Build hover contents for a definition, splitting the leading doccomments (rendered as
+    /// markdown prose) from the definition body (rendered as syntax-highlighted ADL).
+    ///
+    /// Doccomments are part of the definition node in the tree-sitter grammar (inside a
+    /// `definition_preamble`), so we walk the definition's children, peel off the preamble
+    /// docstrings/comments, and emit the remainder as code.
     fn get_hover_text(&self, nid: usize, content: impl AsRef<[u8]>) -> Vec<MarkedString> {
+        let content = content.as_ref();
         let mut results = vec![];
         let root = self.tree.root_node();
         let mut cursor = root.walk();
@@ -57,7 +60,7 @@ impl ParsedTree {
             error!(
                 "cursor is not on a user_defined_name: {:?} {:?}",
                 node,
-                node.utf8_text(content.as_ref()).ok()
+                node.utf8_text(content).ok()
             );
             return vec![];
         }
@@ -66,21 +69,55 @@ impl ParsedTree {
             return vec![];
         };
 
-        // find the definition text including doccomments
-        let def_text = def_node
-            .utf8_text(content.as_ref())
+        // Separate the doccomment preamble from the code portion of the definition.
+        let mut doc_lines: Vec<String> = Vec::new();
+        let mut code_start_byte = def_node.end_byte();
+        let mut child_cursor = def_node.walk();
+        for child in def_node.children(&mut child_cursor) {
+            if NodeKind::is_definition_preamble(&child) {
+                let mut preamble_cursor = child.walk();
+                for preamble_child in child.children(&mut preamble_cursor) {
+                    if NodeKind::is_docstring(&preamble_child)
+                        || NodeKind::is_comment(&preamble_child)
+                    {
+                        if let Ok(text) = preamble_child.utf8_text(content) {
+                            doc_lines.push(strip_doc_marker(text));
+                        }
+                    }
+                }
+            } else if NodeKind::is_docstring(&child) || NodeKind::is_comment(&child) {
+                if let Ok(text) = child.utf8_text(content) {
+                    doc_lines.push(strip_doc_marker(text));
+                }
+            } else {
+                // First non-doc child marks where the definition body begins.
+                code_start_byte = child.start_byte();
+                break;
+            }
+        }
+
+        if !doc_lines.is_empty() {
+            results.push(MarkedString::String(doc_lines.join("\n")));
+        }
+
+        let code_text = std::str::from_utf8(&content[code_start_byte..def_node.end_byte()])
             .ok()
             .map(|s| s.trim().to_string());
 
-        if let Some(def_text) = def_text {
+        if let Some(code_text) = code_text.filter(|s| !s.is_empty()) {
             results.push(MarkedString::LanguageString(lsp_types::LanguageString {
                 language: "adl".into(),
-                value: def_text,
+                value: code_text,
             }));
         }
 
         results
     }
+}
+
+/// Strip the leading `///`/`//` doc markers and surrounding whitespace from a comment line.
+fn strip_doc_marker(text: &str) -> String {
+    text.trim().trim_start_matches('/').trim().to_string()
 }
 
 #[cfg(test)]
