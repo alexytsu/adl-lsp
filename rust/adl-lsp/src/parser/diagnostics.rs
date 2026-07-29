@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use tracing::debug;
 use tree_sitter::Node;
 
-use crate::node::{AdlImportDeclaration, AdlModuleBody, NodeKind};
+use crate::node::{AdlImportDeclaration, AdlModuleBody, NodeKind, is_missing_semicolon};
 use crate::parser::tree::Tree;
 use crate::parser::ts_lsp_interop::ts_to_lsp_position;
 
@@ -101,7 +101,7 @@ impl ParsedTree {
             .flat_map(|predicate| {
                 self.find_all_nodes(*predicate)
                     .into_iter()
-                    .filter(|n| is_missing_semicolon(*n))
+                    .filter(|n| is_missing_semicolon(n))
                     .map(create_missing_semicolon_diagnostic)
             })
             .collect()
@@ -193,12 +193,6 @@ impl ParsedTree {
 
         Some(diagnostics)
     }
-}
-
-fn is_missing_semicolon(node: Node<'_>) -> bool {
-    let mut cursor = node.walk();
-    let last_child = cursor.goto_last_child();
-    last_child && cursor.node().kind() != ";"
 }
 
 #[cfg(test)]

@@ -4,6 +4,16 @@ pub use kind::NodeKind;
 use tracing::warn;
 use tree_sitter::{Node, TreeCursor};
 
+/// Shared heuristic for declarations that should be terminated by `;`: the node is considered
+/// to be missing its semicolon when its last child is not a `;` token.
+///
+/// Centralised here so every typed wrapper and the diagnostics pass share one definition.
+pub fn is_missing_semicolon(node: &Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    let last_child = cursor.goto_last_child();
+    last_child && cursor.node().kind() != ";"
+}
+
 /// Extract the declared type name from a definition node (`type`/`newtype`/`struct`/`union`).
 ///
 /// Every ADL definition names its type via a single `type_name` child; this returns its text.
@@ -301,9 +311,7 @@ impl<'a> AdlTypeDefinition<'a> {
     }
 
     pub fn is_missing_semicolon(&self) -> bool {
-        let mut cursor = self.cursor();
-        let last_child = cursor.goto_last_child();
-        last_child && cursor.node().kind() != ";"
+        is_missing_semicolon(&self.node)
     }
 }
 
@@ -344,9 +352,7 @@ impl<'a> AdlNewtypeDefinition<'a> {
     }
 
     pub fn is_missing_semicolon(&self) -> bool {
-        let mut cursor = self.cursor();
-        let last_child = cursor.goto_last_child();
-        last_child && cursor.node().kind() != ";"
+        is_missing_semicolon(&self.node)
     }
 }
 
@@ -385,9 +391,7 @@ impl<'a> AdlStructDefinition<'a> {
     }
 
     pub fn is_missing_semicolon(&self) -> bool {
-        let mut cursor = self.cursor();
-        let last_child = cursor.goto_last_child();
-        last_child && cursor.node().kind() != ";"
+        is_missing_semicolon(&self.node)
     }
 }
 
@@ -426,9 +430,7 @@ impl<'a> AdlUnionDefinition<'a> {
     }
 
     pub fn is_missing_semicolon(&self) -> bool {
-        let mut cursor = self.cursor();
-        let last_child = cursor.goto_last_child();
-        last_child && cursor.node().kind() != ";"
+        is_missing_semicolon(&self.node)
     }
 }
 
@@ -466,9 +468,7 @@ impl<'a> AdlField<'a> {
     }
 
     pub fn is_missing_semicolon(&self) -> bool {
-        let mut cursor = self.cursor();
-        let last_child = cursor.goto_last_child();
-        last_child && cursor.node().kind() != ";"
+        is_missing_semicolon(&self.node)
     }
 }
 
@@ -506,8 +506,6 @@ impl<'a> AdlAnnotationDeclaration<'a> {
     }
 
     pub fn is_missing_semicolon(&self) -> bool {
-        let mut cursor = self.cursor();
-        let last_child = cursor.goto_last_child();
-        last_child && cursor.node().kind() != ";"
+        is_missing_semicolon(&self.node)
     }
 }

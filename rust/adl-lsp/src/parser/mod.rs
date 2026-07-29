@@ -10,6 +10,7 @@ use crate::{
 pub mod definition;
 pub mod diagnostics;
 pub mod hover;
+pub mod primitives;
 pub mod references;
 pub mod symbols;
 pub mod tree;

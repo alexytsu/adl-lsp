@@ -65,8 +65,13 @@ impl NodeKind {
             || Self::is_union_definition(n)
     }
 
+    /// A node that introduces a name: the `type_name` of a declaration, or an import
+    /// declaration (which introduces the imported name into the module's scope).
+    ///
+    /// Deliberately does NOT include the definition bodies (struct/union/etc.) themselves —
+    /// references inside a definition body must not count as "from a definition".
     pub fn is_definition(n: &Node) -> bool {
-        Self::is_import_declaration(n) || Self::is_type_name(n) || Self::is_import_declaration(n)
+        Self::is_import_declaration(n) || Self::is_type_name(n)
     }
 
     /// Check if an identifier is part of a scoped name
