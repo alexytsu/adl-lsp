@@ -182,3 +182,41 @@ impl AdlLanguageServerState {
         self.import_manager.cache()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// Simulates textDocument/didChange full-text sync: an import statement typed
+    /// character-by-character, each intermediate state re-ingested. The ingest path must never
+    /// panic, always yield a tree, and keep diagnostics away from the untouched struct.
+    #[test]
+    fn test_incremental_ingest_stays_localized() {
+        let state = AdlLanguageServerState::new();
+        let mut parser = AdlParser::new();
+        let uri: Url = "file:///incremental_test.adl".parse().unwrap();
+
+        let prefix = "module test.incremental {\n";
+        let import_line = "    import common.db.User;";
+        // The struct occupies lines 3..=5 and is never edited.
+        let suffix = "\n\n    struct S {\n        String name;\n    };\n};\n";
+
+        for typed in 0..=import_line.len() {
+            let doc = format!("{prefix}{}{suffix}", &import_line[..typed]);
+            let diagnostics = state
+                .ingest_document(&mut parser, &uri, doc.clone())
+                .unwrap_or_else(|| panic!("no tree after typing {typed} chars: {doc:?}"));
+
+            // Diagnostics must not land inside the untouched struct body (lines 3..=5).
+            // Whole-module diagnostics (starting at line 0) and import-line diagnostics
+            // (line 1) are acceptable while the import is incomplete.
+            for diagnostic in &diagnostics {
+                assert!(
+                    !(3..=5).contains(&diagnostic.range.start.line),
+                    "diagnostic leaked into the untouched struct after typing {typed} chars \
+                     of the import: {diagnostic:?}\ndocument: {doc:?}"
+                );
+            }
+        }
+    }
+}

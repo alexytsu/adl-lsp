@@ -242,6 +242,25 @@ mod test {
         assert_yaml_snapshot!(parsed.unwrap().collect_diagnostics(contents));
     }
 
+    /// The grammar-v0.7 fixtures (versioned decls, annotation declarations, a field named
+    /// `String`, newtype-with-default) must parse without any tree-local diagnostics.
+    #[test]
+    fn test_v07_fixtures_parse_clean() {
+        for (name, contents) in [
+            ("versioned.adl", include_str!("input/versioned.adl")),
+            ("annotations.adl", include_str!("input/annotations.adl")),
+            ("misc_v07.adl", include_str!("input/misc_v07.adl")),
+        ] {
+            let url: Url = format!("file://foo/{name}").parse().unwrap();
+            let parsed = AdlParser::new().parse(url, contents).expect("parse");
+            let diagnostics = parsed.collect_diagnostics(contents);
+            assert!(
+                diagnostics.is_empty(),
+                "{name} produced diagnostics: {diagnostics:#?}"
+            );
+        }
+    }
+
     #[test]
     fn test_collect_missing_semicolon_no_error() {
         let url: Url = "file://foo/message.adl".parse().unwrap();

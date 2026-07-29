@@ -1,0 +1,12 @@
+module test.misc {
+
+    /// A field legally named after a primitive type.
+    struct Weird {
+        String String;
+        Int32 value;
+    };
+
+    newtype Count = Int32 = 0;
+
+    newtype Email = String;
+};

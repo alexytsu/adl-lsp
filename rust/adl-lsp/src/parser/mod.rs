@@ -49,6 +49,82 @@ impl Default for AdlParser {
     }
 }
 
+/// Conformance: the parser must handle the canonical ADL corpus (adl-lang/adl stdlib and
+/// compiler test inputs) without a single ERROR or MISSING node. The corpus is vendored by
+/// tree-sitter-adl (Workstream A) at `test/canonical/`, reached via the path dependency.
+#[cfg(test)]
+mod conformance {
+    use super::AdlParser;
+    use crate::node::NodeKind;
+    use crate::parser::tree::Tree;
+    use lsp_types::Url;
+    use std::path::{Path, PathBuf};
+
+    fn collect_adl_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_adl_files(&path, files);
+            } else if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".adl") || n.contains(".adl-"))
+            {
+                files.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_corpus_parses_without_errors() {
+        let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tree-sitter-adl/test/canonical");
+        assert!(
+            corpus.exists(),
+            "canonical corpus not found at {} — requires the tree-sitter-adl path dependency \
+             checkout with its vendored corpus",
+            corpus.display()
+        );
+
+        let mut files = Vec::new();
+        collect_adl_files(&corpus, &mut files);
+        assert!(!files.is_empty(), "no .adl files found in corpus");
+
+        let mut parser = AdlParser::new();
+        let mut failures = Vec::new();
+        for path in &files {
+            let contents = match std::fs::read_to_string(path) {
+                Ok(contents) => contents,
+                Err(_) => continue, // non-utf8 corpus entries are out of scope
+            };
+            let uri = Url::from_file_path(path).expect("absolute path");
+            let Some(tree) = parser.parse(uri, contents.as_bytes()) else {
+                failures.push(format!("{}: parser returned no tree", path.display()));
+                continue;
+            };
+            let errors = tree.find_all_nodes(NodeKind::is_error).len();
+            let missing = tree.find_all_nodes(NodeKind::is_missing).len();
+            if errors > 0 || missing > 0 {
+                failures.push(format!(
+                    "{}: {errors} ERROR node(s), {missing} MISSING node(s)",
+                    path.display()
+                ));
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "{} of {} corpus files failed to parse cleanly:\n{}",
+            failures.len(),
+            files.len(),
+            failures.join("\n")
+        );
+    }
+}
+
 impl ParsedTree {
     pub fn find_module_definition(&self) -> Option<AdlModuleDefinition> {
         self.find_first_node(NodeKind::is_module_definition)

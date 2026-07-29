@@ -1,0 +1,23 @@
+module test.versioned {
+
+    struct Settings#1 {
+        String name;
+    };
+
+    struct Settings#2 {
+        String name;
+        Int32 timeoutMs;
+    };
+
+    union Shape#1 {
+        Void circle;
+        Void square;
+    };
+
+    type Alias#2 = Settings;
+
+    struct Consumer {
+        Settings settings;
+        Shape shape;
+    };
+};

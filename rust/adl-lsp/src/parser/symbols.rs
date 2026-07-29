@@ -257,4 +257,45 @@ mod test {
         let symbols = tree.collect_document_symbols(content.as_bytes());
         insta::assert_yaml_snapshot!(symbols);
     }
+
+    /// Versioned declarations render as `Name#version` in the symbol tree.
+    #[test]
+    fn test_versioned_symbols_snapshot() {
+        let mut parser = AdlParser::new();
+        let uri = Url::parse("file:///versioned.adl").unwrap();
+        let content = include_str!("input/versioned.adl");
+
+        let tree = parser.parse(uri, content.as_bytes()).unwrap();
+        let symbols = tree.collect_document_symbols(content.as_bytes());
+
+        let module = symbols
+            .iter()
+            .find(|s| s.kind == SymbolKind::MODULE)
+            .expect("module symbol");
+        let names: Vec<&str> = module
+            .children
+            .iter()
+            .flatten()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(names.contains(&"Settings#1"), "names: {names:?}");
+        assert!(names.contains(&"Settings#2"), "names: {names:?}");
+        assert!(names.contains(&"Shape#1"), "names: {names:?}");
+        assert!(names.contains(&"Alias#2"), "names: {names:?}");
+        assert!(names.contains(&"Consumer"), "names: {names:?}");
+
+        insta::assert_yaml_snapshot!(symbols);
+    }
+
+    /// A field named `String` (legal ADL) and newtype-with-default keep clean symbols.
+    #[test]
+    fn test_misc_v07_symbols_snapshot() {
+        let mut parser = AdlParser::new();
+        let uri = Url::parse("file:///misc_v07.adl").unwrap();
+        let content = include_str!("input/misc_v07.adl");
+
+        let tree = parser.parse(uri, content.as_bytes()).unwrap();
+        let symbols = tree.collect_document_symbols(content.as_bytes());
+        insta::assert_yaml_snapshot!(symbols);
+    }
 }

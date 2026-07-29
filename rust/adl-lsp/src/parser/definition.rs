@@ -250,4 +250,30 @@ mod test {
         let string_not_empty = tree.definition("StringNE", contents.as_bytes());
         assert_yaml_snapshot!("common.string.StringNE", string_not_empty);
     }
+
+    /// Goto-definition on a versioned type resolves to the highest version; rename/references
+    /// helpers cover the declaration names of every version.
+    #[test]
+    fn test_versioned_definition() {
+        let uri: Url = "file://input/versioned.adl".parse().unwrap();
+        let contents = include_str!("input/versioned.adl");
+
+        let mut parser = crate::parser::AdlParser::new();
+        let tree = parser.parse(uri, contents.as_bytes()).unwrap();
+
+        // Highest version wins: `Settings#2` is declared on line 6.
+        let settings = tree.definition("Settings", contents.as_bytes());
+        match settings {
+            Some(crate::parser::definition::DefinitionLocation::Resolved(ref location)) => {
+                assert_eq!(location.range.start.line, 6);
+            }
+            other => panic!("expected resolved definition, got {other:?}"),
+        }
+
+        // All versions are covered for rename/references.
+        let all = tree.definition_name_locations("Settings", contents.as_bytes());
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].range.start.line, 2);
+        assert_eq!(all[1].range.start.line, 6);
+    }
 }

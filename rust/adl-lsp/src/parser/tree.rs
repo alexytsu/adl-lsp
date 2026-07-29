@@ -498,6 +498,71 @@ mod tests {
     }
 
     #[test]
+    fn test_annotation_field_reference_extraction() {
+        let uri: Url = "file://annotations.adl".parse().unwrap();
+        let contents = include_str!("input/annotations.adl");
+
+        let mut parser = AdlParser::new();
+        let tree = parser.parse(uri, contents.as_bytes()).unwrap();
+
+        // `lastName` in `annotation Person::lastName SerializedName "ln";` (line 9).
+        let reference = tree.get_annotation_field_reference_at(
+            &Position {
+                line: 9,
+                character: 25,
+            },
+            contents.as_bytes(),
+        );
+        assert_eq!(reference, Some(("Person", "lastName")));
+
+        // Local target resolves to the `lastName` field definition (line 6, char 15).
+        let location = tree
+            .get_annotation_field_definition_at(
+                &Position {
+                    line: 9,
+                    character: 25,
+                },
+                contents.as_bytes(),
+            )
+            .expect("local annotation target should resolve");
+        assert_eq!(location.range.start.line, 6);
+        assert_eq!(location.range.start.character, 15);
+
+        // Qualified target: `id` in `annotation common.db.User::id Doc ...` (line 11).
+        let reference = tree.get_annotation_field_reference_at(
+            &Position {
+                line: 11,
+                character: 31,
+            },
+            contents.as_bytes(),
+        );
+        assert_eq!(reference, Some(("common.db.User", "id")));
+        // ... which is not resolvable locally (server resolves it via the import table).
+        assert!(
+            tree.get_annotation_field_definition_at(
+                &Position {
+                    line: 11,
+                    character: 31,
+                },
+                contents.as_bytes(),
+            )
+            .is_none()
+        );
+
+        // A module-target annotation without a `::field` is not a field reference (line 12).
+        assert!(
+            tree.get_annotation_field_reference_at(
+                &Position {
+                    line: 12,
+                    character: 20,
+                },
+                contents.as_bytes(),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn test_annotation_field_goto() {
         let uri: Url = "file://test.adl".parse().unwrap();
         let contents = r#"module test.module {

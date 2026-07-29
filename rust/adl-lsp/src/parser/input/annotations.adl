@@ -1,0 +1,14 @@
+module test.annotations {
+
+    import common.db.User;
+
+    struct Person {
+        String firstName;
+        String lastName;
+    };
+
+    annotation Person::lastName SerializedName "ln";
+    annotation Person Doc "a person";
+    annotation common.db.User::id Doc "qualified target field";
+    annotation test.annotations Doc "module target";
+};
