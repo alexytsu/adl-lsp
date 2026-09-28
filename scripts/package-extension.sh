@@ -48,7 +48,7 @@ else
   or pass --allow-unpublished-server."
 fi
 
-if [ -n "$(git status --porcelain -- . ':!*.vsix')" ]; then
+if [ -n "$(git status --porcelain --untracked-files=no -- .)" ]; then
   echo "! ts/adl-vscode has uncommitted changes; the package will not match a commit"
 fi
 

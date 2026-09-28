@@ -40,7 +40,8 @@ if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
 fi
 ok "tag $tag is free"
 
-dirty=$(git status --porcelain -- "$root")
+# Untracked files are not part of the release, so they do not count.
+dirty=$(git status --porcelain --untracked-files=no -- "$root")
 if [ -n "$dirty" ]; then
   $publish && fail "the working tree has uncommitted changes:
 $dirty"
