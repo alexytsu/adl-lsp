@@ -1,0 +1,46 @@
+module adlc.config.rust {
+
+/// ADL module or declaration annotation to control
+/// whether code is actually generated.
+type RustGenerate = Bool;
+
+/// ADL field annotation giving explicit control over
+/// how a field should be stored.
+union RustStorageModel {
+   /// Standard inline storage
+   Void standard;
+
+   /// Store the value in a Box<>
+   Void boxed;
+};
+
+/// ADL declaration annotation to specify that a custom type
+/// should be used
+struct RustCustomType
+{
+    // The fully scoped name of the type to be used
+    String rustname;
+
+    // The fully scoped name of the module containing
+    // helper code. Specifically this will contain the
+    // function(s) used to construct values from ADL literal
+    // values.
+    String helpers;
+
+    // If non-empty the code for the original ADL type will be emitted,
+    // but with the supplied name. This can be useful within the
+    // implementation of the custom type. 
+    String generateOrigADLType = "";
+
+    // The standard traits that this custom type implements.
+    // Generally you want either:
+    //       ["Eq", "PartialEq", "Hash", "Serialize", "Deserialize", "Clone"]
+    // or
+    //       ["PartialEq", "Serialize", "Deserialize", "Clone"]
+    //
+    // `Serialize` and `Deserialize` must be consistent 
+    // with the standard ADL serialization schema.
+    Vector<String> stdTraits;
+};
+
+};

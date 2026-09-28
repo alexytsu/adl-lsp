@@ -38,6 +38,11 @@ pub struct Cli {
     #[clap(long, value_parser, num_args = 1.., value_delimiter = ',')]
     pub search_dirs: Vec<String>,
 
+    /// Directory containing the ADL standard library (the one holding `sys/types.adl`).
+    /// By default it is found from the installed ADL toolchain, falling back to a bundled copy.
+    #[clap(long, env = "ADL_LSP_STDLIB_DIR")]
+    pub stdlib_dir: Option<String>,
+
     /// Verbosity of the logs written to stderr
     #[clap(long, value_enum, env = "ADL_LSP_LOG_LEVEL", default_value_t)]
     pub log_level: LogLevel,

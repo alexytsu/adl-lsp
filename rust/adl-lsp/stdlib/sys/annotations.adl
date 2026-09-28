@@ -1,0 +1,22 @@
+// Standard annotation types, imported by default.
+
+module sys.annotations
+{
+
+type Doc = String;
+
+type SerializedName = String;
+
+// Experimental annotation to switch union serialization
+// to be "internally tagged". The use of this annotation is
+// not recommended unless required for compatibility with external systems.
+// 
+// The annotation can only be applied to monomorphic unions that have all struct
+// fields.
+struct SerializedWithInternalTag {
+  String tag;
+};
+
+type CustomSerialization = Bool;
+
+};

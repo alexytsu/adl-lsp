@@ -239,6 +239,126 @@ impl AdlLanguageServerState {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::server::stdlib;
+
+    /// Make the embedded copy the active standard library, as the server does when no
+    /// toolchain is installed. No toolchain locations are consulted, so the result does not
+    /// depend on the machine running the tests.
+    fn activate_embedded_stdlib() -> PathBuf {
+        stdlib::activate(&stdlib::Locations::default()).expect("stdlib materializes")
+    }
+
+    /// Build a state that knows about `workspace_root` and the embedded standard library,
+    /// mirroring what `Server::initialize_workspace` registers before ingesting documents.
+    fn state_with_stdlib(
+        workspace_files: &[&std::path::Path],
+        workspace_root: &std::path::Path,
+    ) -> AdlLanguageServerState {
+        let stdlib_root = activate_embedded_stdlib();
+        let stdlib_types = Url::from_file_path(stdlib_root.join("sys/types.adl")).unwrap();
+
+        let mut file_to_root = HashMap::from([(stdlib_types.clone(), stdlib_root.clone())]);
+        let mut root_to_files = HashMap::from([(stdlib_root, HashSet::from([stdlib_types]))]);
+        for file in workspace_files {
+            let uri = Url::from_file_path(file).unwrap();
+            file_to_root.insert(uri.clone(), workspace_root.to_path_buf());
+            root_to_files
+                .entry(workspace_root.to_path_buf())
+                .or_default()
+                .insert(uri);
+        }
+
+        let state = AdlLanguageServerState::new();
+        state.register_package_roots(&file_to_root, &root_to_files);
+        state
+    }
+
+    /// Regression test: workspaces import `sys.types` without having the standard library in
+    /// their own tree. The import must resolve to the embedded copy, with no diagnostics.
+    #[test]
+    fn test_sys_import_resolves_to_embedded_stdlib() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("common")).unwrap();
+        std::fs::write(root.join("adl-package.json"), r#"{ "name": "test" }"#).unwrap();
+        let ui = root.join("common/ui.adl");
+        let contents = "module common.ui {\n    import sys.types.Pair;\n\n    struct S {\n        Pair<String, String> labels;\n    };\n};\n";
+        std::fs::write(&ui, contents).unwrap();
+
+        let state = state_with_stdlib(&[&ui], &root);
+        let mut parser = AdlParser::new();
+        let diagnostics = state
+            .ingest_document(
+                &mut parser,
+                &Url::from_file_path(&ui).unwrap(),
+                contents.to_string(),
+            )
+            .unwrap();
+        assert_eq!(diagnostics, vec![], "sys import must not be flagged");
+
+        let target = state
+            .get_import_target(&Fqn::from_module_name_and_type_name("sys.types", "Pair"))
+            .expect("sys.types.Pair resolves");
+        let stdlib_root = activate_embedded_stdlib();
+        assert_eq!(
+            target.to_file_path().unwrap(),
+            stdlib_root.join("sys/types.adl")
+        );
+    }
+
+    /// A workspace that vendors its own `sys` modules takes priority over the embedded copy.
+    #[test]
+    fn test_workspace_sys_module_shadows_embedded_stdlib() {
+        // Prefixed so the vendored root sorts after the embedded stdlib's path: the vendored
+        // copy must win because of its priority, not because of alphabetical luck.
+        let workspace = tempfile::Builder::new().prefix("zz-").tempdir().unwrap();
+        // The source package and the vendored stdlib are separate package roots, so resolution
+        // goes through the package root ordering rather than the source-package shortcut.
+        let app_root = workspace.path().canonicalize().unwrap().join("app");
+        let vendor_root = workspace.path().canonicalize().unwrap().join("vendor");
+        assert!(vendor_root > activate_embedded_stdlib());
+        std::fs::create_dir_all(app_root.join("common")).unwrap();
+        std::fs::create_dir_all(vendor_root.join("sys")).unwrap();
+        std::fs::write(app_root.join("adl-package.json"), r#"{ "name": "app" }"#).unwrap();
+        std::fs::write(
+            vendor_root.join("adl-package.json"),
+            r#"{ "name": "vendor" }"#,
+        )
+        .unwrap();
+
+        let vendored_types = vendor_root.join("sys/types.adl");
+        std::fs::write(
+            &vendored_types,
+            "module sys.types {\n    struct Pair<A, B> {\n        A v1;\n        B v2;\n    };\n};\n",
+        )
+        .unwrap();
+        let ui = app_root.join("common/ui.adl");
+        let contents = "module common.ui {\n    import sys.types.Pair;\n};\n";
+        std::fs::write(&ui, contents).unwrap();
+
+        let state = state_with_stdlib(&[&ui], &app_root);
+        let vendored_uri = Url::from_file_path(&vendored_types).unwrap();
+        state.register_package_roots(
+            &HashMap::from([(vendored_uri.clone(), vendor_root.clone())]),
+            &HashMap::from([(vendor_root, HashSet::from([vendored_uri.clone()]))]),
+        );
+
+        let mut parser = AdlParser::new();
+        state
+            .ingest_document(
+                &mut parser,
+                &Url::from_file_path(&ui).unwrap(),
+                contents.to_string(),
+            )
+            .unwrap();
+
+        // Only the importing document has been ingested, so the vendored module is the sole
+        // registered definition location only if resolution preferred it.
+        let target = state
+            .get_import_target(&Fqn::from_module_name_and_type_name("sys.types", "Pair"))
+            .expect("sys.types.Pair resolves");
+        assert_eq!(target, vendored_uri);
+    }
 
     /// Simulates textDocument/didChange full-text sync: an import statement typed
     /// character-by-character, each intermediate state re-ingested. The ingest path must never

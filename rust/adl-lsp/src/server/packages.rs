@@ -6,6 +6,8 @@ use std::{
 };
 use tracing::{error, trace};
 
+use crate::server::stdlib;
+
 /// A dependency of an ADL package.
 ///
 /// Only `localdir` references name files the server can read. Other kinds of reference (the
@@ -138,9 +140,10 @@ pub fn resolve_import(
         }
     }
 
-    // Check other package roots only after attempting the source package
+    // Check other package roots only after attempting the source package. The embedded
+    // standard library goes last so a workspace that vendors its own `sys` modules wins.
     let mut package_roots: Vec<&PathBuf> = search_dirs.keys().collect();
-    package_roots.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+    package_roots.sort_by_key(|root| (stdlib::is_root(root), root.as_os_str()));
 
     for package_root in &package_roots {
         let target_path = package_root.join(format!("{}.adl", imported_module_path.join("/")));

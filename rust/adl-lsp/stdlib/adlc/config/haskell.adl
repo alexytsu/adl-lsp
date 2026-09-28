@@ -1,0 +1,44 @@
+module adlc.config.haskell {
+
+/// Annotation to override the field prefix for structs
+/// and unions. It may be applied to the struct or union
+/// declaration or to individual fields.
+type HaskellFieldPrefix = String;
+
+struct UnionConstructor
+{
+    String fieldName;
+    String constructor;
+};
+
+struct HaskellCustomType
+{
+    // The name in haskell of the type to be used
+    String haskellname;
+
+    // The imports required to use the haskell type
+    Vector<String> haskellimports;
+
+    // Any extra exports required from the module where the custom type
+    // was declared
+    Vector<String> haskellextraexports = [];
+
+    // Text to be inserted to implement the haskell
+    // type
+    Vector<String> insertCode;
+
+    // If non-empty, the code for the original ADL type will be emitted,
+    // but with the supplied name.
+    String generateOrigADLType = "";
+
+    // The name of the constructor/function to be
+    // called to create values of this type (if it's
+    // a struct annotation)
+    String structConstructor = "";
+
+    // The names of the constructors/functions to be
+    // called to create values of this type (if it's
+    // a union annotation)
+    Vector<UnionConstructor> unionConstructors = [];
+};
+};

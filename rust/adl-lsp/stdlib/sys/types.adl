@@ -1,0 +1,41 @@
+module sys.types
+{
+// Some standard types
+
+struct Pair<T1,T2>
+{
+    T1 v1;
+    T2 v2;
+};
+
+union Either<T1,T2>
+{
+    T1 left;
+    T2 right;
+};
+
+union Maybe<T>
+{
+    Void nothing;
+    T just;
+};
+
+union Result<T, E> {
+    T ok;
+    E error;
+};
+
+struct MapEntry<K,V>
+{
+    @SerializedName "k"
+    K key;
+
+    @SerializedName "v"
+    V value;
+};
+
+newtype Map<K,V> = Vector<MapEntry<K,V>>;
+
+newtype Set<T> = Vector<T>;
+
+};

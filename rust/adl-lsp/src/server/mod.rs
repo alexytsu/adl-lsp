@@ -39,6 +39,7 @@ pub mod config;
 mod imports;
 mod packages;
 mod state;
+mod stdlib;
 
 pub struct TickEvent;
 
@@ -48,6 +49,8 @@ pub struct Server {
     counter: i32,
     config: ServerConfig,
     state: AdlLanguageServerState,
+    /// Package root of the ADL standard library, located when the workspace is initialized
+    stdlib_root: Option<PathBuf>,
     parser: Arc<Mutex<AdlParser>>,
     /// Set once a `shutdown` request has been received. After this, the server must reject any
     /// further requests with `InvalidRequest` (per the LSP spec) until it `exit`s.
@@ -132,6 +135,7 @@ impl Server {
             client: client.clone(),
             config,
             state: AdlLanguageServerState::new(),
+            stdlib_root: None,
             parser: Arc::new(Mutex::new(AdlParser::new())),
             shutdown: Arc::new(AtomicBool::new(false)),
         }
@@ -169,6 +173,11 @@ impl Server {
     /// Initialize the server by discovering and processing all ADL files in package roots
     pub fn initialize_workspace(&mut self) {
         debug!("initializing workspace by discovering ADL files in package roots");
+
+        self.stdlib_root = stdlib::activate(&stdlib::Locations::from_environment(
+            self.config.stdlib_dir.clone(),
+            &self.config.search_dirs,
+        ));
 
         let (adl_file_to_package_root, package_root_to_adl_files) = self.discover_adl_files();
 
@@ -235,6 +244,12 @@ impl Server {
             if let Ok(cwd) = std::env::current_dir() {
                 package_roots.insert(cwd);
             }
+        }
+
+        // The standard library ships with the compiler rather than with each workspace, so
+        // it is always searched (after everything else).
+        if let Some(stdlib_root) = &self.stdlib_root {
+            package_roots.insert(stdlib_root.clone());
         }
 
         for package_root in &package_roots {
@@ -1250,22 +1265,35 @@ impl Server {
         &mut self,
         params: DidChangeConfigurationParams,
     ) -> ControlFlow<Result<(), Error>> {
-        let search_dirs: Result<Vec<PathBuf>, ResponseError> = params
+        let search_dirs = params
             .settings
             .get("searchDirs")
-            .ok_or_else(|| ResponseError::new(ErrorCode::INTERNAL_ERROR, "searchDirs not found"))
-            .map(|v| {
-                v.as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| PathBuf::from(v.as_str().unwrap()))
-                    .collect()
+            .and_then(|dirs| dirs.as_array())
+            .map(|dirs| {
+                dirs.iter()
+                    .filter_map(|dir| dir.as_str())
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>()
             });
-        if let Ok(search_dirs) = search_dirs {
-            self.config.search_dirs = search_dirs;
-            self.state.clear_cache();
-            self.initialize_workspace();
+        // Absent means "unchanged"; an empty string clears the override.
+        let stdlib_dir = params
+            .settings
+            .get("stdlibDir")
+            .and_then(|dir| dir.as_str())
+            .map(|dir| Some(dir).filter(|dir| !dir.is_empty()).map(PathBuf::from));
+
+        if search_dirs.is_none() && stdlib_dir.is_none() {
+            warn!("configuration change contained neither searchDirs nor stdlibDir");
+            return ControlFlow::Continue(());
         }
+        if let Some(search_dirs) = search_dirs {
+            self.config.search_dirs = search_dirs;
+        }
+        if let Some(stdlib_dir) = stdlib_dir {
+            self.config.stdlib_dir = stdlib_dir;
+        }
+        self.state.clear_cache();
+        self.initialize_workspace();
         ControlFlow::Continue(())
     }
 }

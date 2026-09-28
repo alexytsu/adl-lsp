@@ -1,0 +1,31 @@
+module adlc.config.java {
+
+/// ADL module annotation to specify a target java package.
+type JavaPackage = String;
+
+/// ADL module or declaration annotation to control
+/// whether code is actually generated.
+
+type JavaGenerate = Bool;
+
+
+/// ADL declaration annotation to specify that a custom type
+/// should be used
+struct JavaCustomType
+{
+    // The fully scoped java name of the interface type to be used
+    String javaname;
+
+    // If non empty, the fully scoped java name of the class to be constructed if different to javaname
+    String ctorjavaname = "";
+
+    // The fully scoped name of the class containing
+    // helper code.
+    String helpers;
+
+    // If true, we still generate the standard ADL derived
+    // class (even though no generated code will refer to it)
+    Bool generateType = false;
+};
+
+};
