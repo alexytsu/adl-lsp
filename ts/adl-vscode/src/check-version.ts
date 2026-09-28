@@ -3,7 +3,7 @@ import { LanguageClient } from "vscode-languageclient/node";
 
 export const REQUIRED_MAJOR_VERSION = 0;
 export const REQUIRED_MINOR_VERSION = 9;
-export const REQUIRED_PATCH_VERSION = 0;
+export const REQUIRED_PATCH_VERSION = 1;
 export const REQUIRED_VERSION = `${REQUIRED_MAJOR_VERSION}.${REQUIRED_MINOR_VERSION}.${REQUIRED_PATCH_VERSION}`;
 
 export const INSTALL_COMMAND = "cargo install adl-lsp";

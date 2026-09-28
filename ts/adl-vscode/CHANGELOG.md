@@ -3,6 +3,18 @@
 All notable changes to the "alexytsu.adl-vscode" extension will be documented in
 this file.
 
+## [0.4.1] - 2026-09-28
+
+This update requires version 0.9.1 of `adl-lsp`
+- Imports from the ADL standard library (`sys.types`, `sys.adlast`, ...) resolve: hover and goto definition work on them and they are no longer reported as missing
+- The standard library is taken from your installed ADL toolchain, or from a copy bundled with `adl-lsp` when none is found. Set `adl.stdlibDir` to choose one yourself
+- `adl.searchDirs` defaults to the workspace folder rather than `adl`, so workspaces with several ADL directories work without configuration
+- Hover and goto definition on an import that cannot be resolved return nothing rather than failing with an error
+- `adl-package.json` files without a `dependencies` field are read correctly
+- The server logs at `info` level rather than `debug`
+- An outdated or missing `adl-lsp` is reported with a notification that stays until answered, with buttons to run or copy the update command, and a warning in the status bar
+- `ADL: Restart Language Server` checks the server version again, and the new `ADL: Update Language Server` command reopens the update prompt
+
 ## [0.4.0] - 2026-09-28
 
 This update requires version 0.9.0 of `adl-lsp`, which moves to version 0.7 of the ADL grammar
