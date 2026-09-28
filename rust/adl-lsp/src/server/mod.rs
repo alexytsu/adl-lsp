@@ -492,11 +492,16 @@ impl Server {
         Ok(result)
     }
 
+    /// Look up `import` in the imports table and run `process_import` on the defining document.
+    ///
+    /// Returns `Ok(None)` when the import cannot be resolved. An unresolvable import is a
+    /// problem with the user's workspace (already reported as a diagnostic on the import
+    /// line), not a server failure, so it must not surface as an error response.
     fn resolve_import_from_table<F, T>(
         &mut self,
         import: &Fqn,
         mut process_import: F,
-    ) -> Result<T, ResponseError>
+    ) -> Result<Option<T>, ResponseError>
     where
         F: FnMut(&ParsedTree, &str) -> Result<T, ResponseError>,
     {
@@ -508,21 +513,18 @@ impl Server {
             if let Some(target_tree) = self.get_or_parse_document(&target_uri) {
                 if let Some(target_content) = self.state.get_document_content(&target_uri) {
                     debug!("processing import {:?} in target document", import);
-                    return process_import(&target_tree, &target_content);
+                    return process_import(&target_tree, &target_content).map(Some);
                 } else {
-                    error!("could not get content for target document: {}", target_uri);
+                    warn!("could not get content for target document: {}", target_uri);
                 }
             } else {
-                error!("could not parse target document: {}", target_uri);
+                warn!("could not parse target document: {}", target_uri);
             }
         } else {
-            error!("no import found in table for identifier: {:?}", import);
+            warn!("no import found in table for identifier: {:?}", import);
         }
 
-        Err(ResponseError::new(
-            ErrorCode::INTERNAL_ERROR,
-            "no import found in table",
-        ))
+        Ok(None)
     }
 
     /// Get a document tree, parsing it if not already loaded
@@ -601,7 +603,7 @@ impl Server {
                     ),
                     |tree, contents| Ok(tree.hover(identifier, contents.as_bytes())),
                 )?;
-                hover_items.extend(imported_hover_items);
+                hover_items.extend(imported_hover_items.unwrap_or_default());
             }
             None => {
                 error!("no definition found for {}", identifier);
@@ -688,17 +690,16 @@ impl Server {
                         match definition_location {
                             Some(DefinitionLocation::Resolved(location)) => Ok(Some(location)),
                             Some(DefinitionLocation::Import(_)) | None => {
-                                error!("import not resolved after lookup in import table");
-                                Err(ResponseError::new(
-                                    ErrorCode::INTERNAL_ERROR,
-                                    "import not resolved after lookup in import table",
-                                ))
+                                warn!("import not resolved after lookup in import table");
+                                Ok(None)
                             }
                         }
                     },
                 )?;
 
-                Ok(resolved_import.map(GotoDefinitionResponse::Scalar))
+                Ok(resolved_import
+                    .flatten()
+                    .map(GotoDefinitionResponse::Scalar))
             }
             None => Ok(None),
         }
@@ -758,7 +759,7 @@ impl Server {
             },
         )?;
 
-        Ok(location.map(GotoDefinitionResponse::Scalar))
+        Ok(location.flatten().map(GotoDefinitionResponse::Scalar))
     }
 
     /// Handle navigation to a module file
