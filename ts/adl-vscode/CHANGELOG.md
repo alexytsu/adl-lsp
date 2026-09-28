@@ -3,6 +3,17 @@
 All notable changes to the "alexytsu.adl-vscode" extension will be documented in
 this file.
 
+## [0.4.0] - 2026-09-28
+
+This update requires version 0.9.0 of `adl-lsp`, which moves to version 0.7 of the ADL grammar
+- Diagnostics update as you type rather than only on save
+- Versioned declarations (e.g. `struct X#2`) are supported; goto definition prefers the highest version
+- Goto definition on annotation fields resolves qualified and imported targets
+- Module-form annotation declarations are parsed
+- ADL keywords are reserved, which keeps parse errors local to the broken declaration
+- Document symbols are named after the field rather than its type
+- Installed builds always launch the `adl.lspPath` binary; the local `cargo run` server is only used in the Extension Development Host
+
 ## [0.3.0] - 2025-07-30
 
 This [update](https://github.com/alexytsu/adl-lsp/pull/32) requires version 0.8.0 of `adl-lsp` which brings stability improvements
