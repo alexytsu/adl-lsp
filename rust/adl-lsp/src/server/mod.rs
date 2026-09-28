@@ -178,16 +178,40 @@ impl Server {
             &adl_file_to_package_root.len()
         );
 
-        adl_file_to_package_root
-            .iter()
-            .for_each(|(uri, _package_root)| {
-                if let Ok(contents) = std::fs::read_to_string(uri.path()) {
-                    debug!("preprocessing ADL file: {}", uri);
-                    self.ingest_document(uri, contents);
-                } else {
-                    error!("failed to read file: {}", uri.path());
+        // Import resolution must know about every package root before the first document is
+        // ingested, otherwise cross-package imports depend on ingestion order.
+        self.state
+            .register_package_roots(&adl_file_to_package_root, &package_root_to_adl_files);
+
+        // Sorted so that the scan, and anything that depends on its order, is reproducible.
+        let mut uris: Vec<&Url> = adl_file_to_package_root.keys().collect();
+        uris.sort();
+        let documents: Vec<(&Url, String)> = uris
+            .into_iter()
+            .filter_map(|uri| match std::fs::read_to_string(uri.path()) {
+                Ok(contents) => Some((uri, contents)),
+                Err(e) => {
+                    error!("failed to read file {}: {}", uri.path(), e);
+                    None
                 }
-            });
+            })
+            .collect();
+
+        // First pass: learn the package root of every file, which in marker-less workspaces
+        // comes from its module name rather than from the search dir it was found under.
+        {
+            let mut parser = self.parser.lock().expect("poisoned");
+            for (uri, contents) in &documents {
+                self.state
+                    .register_document_package_root(&mut parser, uri, contents);
+            }
+        }
+
+        // Second pass: resolve imports now that every package root is known.
+        for (uri, contents) in documents {
+            debug!("preprocessing ADL file: {}", uri);
+            self.ingest_document(uri, contents);
+        }
 
         debug!("workspace initialization complete: files processed",);
     }

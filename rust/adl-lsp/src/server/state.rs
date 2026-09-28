@@ -58,14 +58,7 @@ impl AdlLanguageServerState {
         let mut documents = self.documents.write().expect("poisoned");
         let mut trees = self.trees.write().expect("poisoned");
 
-        // Prefer an `adl-package.json` marker; otherwise derive the root from the module name by
-        // walking up the filesystem (module `a.b.c` in `<root>/a/b/c.adl` implies `<root>`).
-        let package_root = packages::find_package_root_by_marker(uri.path()).or_else(|| {
-            parsed_tree
-                .find_module_name(contents.as_bytes())
-                .and_then(|module_name| packages::package_root_from_module(uri.path(), module_name))
-        });
-        if let Some(package_root) = package_root {
+        if let Some(package_root) = Self::package_root_for(uri, &parsed_tree, &contents) {
             adl_file_to_package_root.insert(uri.clone(), package_root.clone());
             package_root_to_adl_files
                 .entry(package_root)
@@ -124,6 +117,66 @@ impl AdlLanguageServerState {
         // The state layer only collects diagnostics; publishing is the server layer's
         // responsibility since it owns the client handle.
         Some(diagnostics)
+    }
+
+    /// Work out which package root a document belongs to.
+    ///
+    /// Prefers an `adl-package.json` marker; otherwise derives the root from the module name by
+    /// walking up the filesystem (module `a.b.c` in `<root>/a/b/c.adl` implies `<root>`).
+    fn package_root_for(uri: &Url, tree: &ParsedTree, contents: &str) -> Option<PathBuf> {
+        packages::find_package_root_by_marker(uri.path()).or_else(|| {
+            tree.find_module_name(contents.as_bytes())
+                .and_then(|module_name| packages::package_root_from_module(uri.path(), module_name))
+        })
+    }
+
+    /// Record the package root of a document without resolving its imports.
+    ///
+    /// The workspace scan runs this over every file before ingesting any of them. Package
+    /// roots in marker-less workspaces are only known once a file inside them has been parsed,
+    /// so without this pass an import into a package whose files had not been ingested yet
+    /// could not use the discovered-files cache and depended on ingestion order.
+    pub fn register_document_package_root(
+        &self,
+        parser: &mut AdlParser,
+        uri: &Url,
+        contents: &str,
+    ) {
+        let Some(tree) = parser.parse(uri.clone(), contents) else {
+            return;
+        };
+        let Some(package_root) = Self::package_root_for(uri, &tree, contents) else {
+            return;
+        };
+        self.register_package_roots(
+            &HashMap::from([(uri.clone(), package_root.clone())]),
+            &HashMap::from([(package_root, HashSet::from([uri.clone()]))]),
+        );
+    }
+
+    /// Record every discovered package root and the files it contains.
+    ///
+    /// Called before the workspace is ingested so that import resolution sees all package
+    /// roots from the first document onwards, rather than only the roots of documents that
+    /// happen to have been ingested already.
+    pub fn register_package_roots(
+        &self,
+        discovered_adl_file_to_package_root: &HashMap<Url, PathBuf>,
+        discovered_package_root_to_adl_files: &HashMap<PathBuf, HashSet<Url>>,
+    ) {
+        let mut adl_file_to_package_root = self.adl_file_to_package_root.write().expect("poisoned");
+        let mut package_root_to_adl_files =
+            self.package_root_to_adl_files.write().expect("poisoned");
+
+        for (uri, package_root) in discovered_adl_file_to_package_root {
+            adl_file_to_package_root.insert(uri.clone(), package_root.clone());
+        }
+        for (package_root, adl_files) in discovered_package_root_to_adl_files {
+            package_root_to_adl_files
+                .entry(package_root.clone())
+                .or_default()
+                .extend(adl_files.iter().cloned());
+        }
     }
 
     pub fn clear_cache(&mut self) {
