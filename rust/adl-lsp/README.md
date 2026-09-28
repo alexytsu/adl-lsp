@@ -65,7 +65,13 @@ distributed under its own [BSD 3-Clause license](./stdlib/LICENSE).
 
 ## Publishing checklist
 
-- Update the version number in `Cargo.toml`
-- Release a new version of `adl-vscode` with a new minimum `adl-lsp` version requirement if necessary
-- `cargo publish`
-- `git tag -a -f -m "adl-lsp-${SEMVER}" adl-lsp-${SEMVER}`
+1. Update the version number in `Cargo.toml` and commit
+2. Run `scripts/release-server.sh` from the repository root. It checks
+   formatting, lints, tests and that the crate packages, and publishes nothing
+3. Run `scripts/release-server.sh --publish`. It publishes the crate, then tags
+   the commit `adl-lsp-${SEMVER}` and pushes the tag, which starts the workflow
+   that builds the release binaries
+4. Publish the draft release on GitHub once the binaries are attached
+5. Release a new version of `adl-vscode` with a new minimum `adl-lsp` version
+   requirement if necessary (see its
+   [README](../../ts/adl-vscode/README.md#publishing-checklist))

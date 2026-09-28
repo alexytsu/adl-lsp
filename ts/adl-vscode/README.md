@@ -42,10 +42,19 @@ This extension contributes the following settings:
 
 ## Publishing checklist
 
-- Update the version number in `package.json`
-- Update the [changelog](./CHANGELOG.md)
-- Update the minimum `adl-lsp` version number in
-  [check-version.ts](./src/check-version.ts) if necessary
-- `git commit -am "adl-vscode version ${SEMVER}"`
-- `git tag -a -f -m "adl-vscode-${SEMVER}" adl-vscode-${SEMVER}`
-- `vsce publish`
+The extension is uploaded to the marketplace by hand as a `.vsix` file.
+
+1. If the extension needs a new `adl-lsp`, publish that first (see the
+   [server README](../../rust/adl-lsp/README.md#publishing-checklist)) and raise
+   the minimum version in [check-version.ts](./src/check-version.ts)
+2. Update the version number in `package.json` and add an entry to the
+   [changelog](./CHANGELOG.md)
+3. `git commit -am "adl-vscode version ${SEMVER}"`
+4. Run `npm run vsix` (or `scripts/package-extension.sh` from the repository
+   root). It builds `adl-vscode-${SEMVER}.vsix` and refuses to continue unless
+   the package is a minified production build without sources or source maps,
+   the changelog has an entry for the version, and the required `adl-lsp`
+   version is on crates.io
+5. Upload the `.vsix` at
+   <https://marketplace.visualstudio.com/manage/publishers/alexytsu>
+6. `git tag -a -m "adl-vscode-${SEMVER}" adl-vscode-${SEMVER}` and push the tag
