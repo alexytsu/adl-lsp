@@ -36,9 +36,13 @@ This extension contributes the following settings:
 
 - `adl.lspPath`: If the `adl-lsp` is not available on your default path, specify
   its location here.
-- `adl.searchDirs`: ADL package locations. An ADL package is the directory that
-  contains top-level ADL modules and may contain an `adl-package.json` file that
-  specifies dependencies.
+- `adl.searchDirs`: Directories to search for ADL files, relative to the
+  workspace folder. Defaults to the workspace folder itself. ADL packages inside
+  them are found from `adl-package.json` files, which may also list
+  dependencies, and otherwise from module names.
+- `adl.stdlibDir`: Directory containing the ADL standard library. Leave it empty
+  to have `adl-lsp` find it, as described in the
+  [server README](https://github.com/alexytsu/adl-lsp/tree/main/rust/adl-lsp#the-adl-standard-library).
 
 ## Publishing checklist
 

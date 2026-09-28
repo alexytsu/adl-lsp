@@ -34,9 +34,14 @@
             "type": "string"
           },
           "default": [
-            "adl"
+            "."
           ],
-          "description": "A list of directories to add to the ADL search path."
+          "description": "Directories to search for ADL files, relative to the workspace folder. Package roots inside them are found from adl-package.json files and module names, so the workspace folder itself is usually enough."
+        },
+        "adl.stdlibDir": {
+          "type": "string",
+          "default": "",
+          "description": "Directory containing the ADL standard library (the one holding sys/types.adl). Leave empty to use the one installed with your ADL toolchain, or the copy bundled with adl-lsp when none is found."
         }
       }
     },

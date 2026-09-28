@@ -7,7 +7,7 @@ import {
 } from "vscode-languageclient/node";
 import { checkVersionAndNotify } from "./check-version";
 import { registerCommands } from "./commands";
-import { getLspExecutable, getSearchDirs } from "./config";
+import { getLspExecutable, getSearchDirs, getStdlibDir } from "./config";
 
 let client: LanguageClient;
 
@@ -44,10 +44,15 @@ export async function activate(context: v.ExtensionContext) {
 
   v.workspace.onDidChangeConfiguration(async (e) => {
     console.log("Configuration changed: ", e);
-    if (e.affectsConfiguration("adl.searchDirs")) {
+    if (
+      e.affectsConfiguration("adl.searchDirs") ||
+      e.affectsConfiguration("adl.stdlibDir")
+    ) {
       client.sendNotification(DidChangeConfigurationNotification.type, {
         settings: {
           searchDirs: getSearchDirs(),
+          // An empty string tells the server to go back to finding it itself.
+          stdlibDir: getStdlibDir() ?? "",
         },
       });
     }

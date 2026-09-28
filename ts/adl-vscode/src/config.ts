@@ -54,6 +54,25 @@ function expandHomePath(input: string): string {
   return input;
 }
 
+/**
+ * @returns The configured ADL standard library directory, or undefined to let the server find it
+ */
+export function getStdlibDir(): string | undefined {
+  const configured = v.workspace
+    .getConfiguration("adl")
+    .get<string>("stdlibDir");
+  if (!configured || configured.trim().length === 0) {
+    return undefined;
+  }
+
+  const expanded = expandHomePath(configured.trim());
+  if (path.isAbsolute(expanded)) {
+    return expanded;
+  }
+  const workspaceRoot = v.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  return workspaceRoot ? path.join(workspaceRoot, expanded) : expanded;
+}
+
 export function getLspPath(): string {
   const adlLspPath: string =
     v.workspace.getConfiguration("adl").get("lspPath") ?? "adl-lsp";
@@ -117,18 +136,29 @@ export function getLspExecutable(extensionPath?: string): {
   const cargoPath = getCargoPath();
   const devCwd = findDevCwd(extensionPath);
 
+  const adlStdlibDir = getStdlibDir();
+
   const adlLspArgs = [
     "--client",
     "vscode",
     "--search-dirs",
     adlSearchDirs.join(","),
+    ...(adlStdlibDir ? ["--stdlib-dir", adlStdlibDir] : []),
   ];
 
   return {
     dev: {
       command: cargoPath,
       args: ["run", "--bin", "adl-lsp", "--", ...adlLspArgs],
-      ...(devCwd ? { options: { cwd: devCwd } } : {}),
+      // Verbose server logs are for working on the server, not for installed builds.
+      ...(devCwd
+        ? {
+            options: {
+              cwd: devCwd,
+              env: { ...process.env, ADL_LSP_LOG_LEVEL: "debug" },
+            },
+          }
+        : {}),
     },
     prod: {
       command: adlLspPath,
