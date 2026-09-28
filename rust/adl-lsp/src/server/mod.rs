@@ -295,10 +295,12 @@ impl Server {
 
                                 // Process each dependency
                                 for dep in &package_definition.dependencies {
-                                    let dep_root = packages::resolve_dependency_path(
-                                        &package_root,
-                                        &dep.localdir,
-                                    );
+                                    let Some(localdir) = dep.localdir() else {
+                                        debug!("skipping non-local dependency: {:?}", dep);
+                                        continue;
+                                    };
+                                    let dep_root =
+                                        packages::resolve_dependency_path(&package_root, localdir);
                                     let normalized_dep_root = packages::normalize_path(&dep_root);
 
                                     if dep_root.exists() {

@@ -6,9 +6,28 @@ use std::{
 };
 use tracing::{error, trace};
 
+/// A dependency of an ADL package.
+///
+/// Only `localdir` references name files the server can read. Other kinds of reference (the
+/// toolchain's `stdlib` package, or kinds added to the schema later) are accepted and
+/// skipped, so that one of them does not make the whole package definition unreadable.
 #[derive(Debug, Deserialize)]
-pub struct AdlPackageRef {
-    pub localdir: String,
+#[serde(untagged)]
+pub enum AdlPackageRef {
+    Localdir {
+        localdir: String,
+    },
+    /// Kept for the debug log line that reports the skipped dependency
+    Other(#[allow(dead_code)] serde_json::Value),
+}
+
+impl AdlPackageRef {
+    pub fn localdir(&self) -> Option<&str> {
+        match self {
+            AdlPackageRef::Localdir { localdir } => Some(localdir),
+            AdlPackageRef::Other(_) => None,
+        }
+    }
 }
 
 /// Find the package root by looking up the directory tree for a file named `adl-package.json`
@@ -80,6 +99,8 @@ pub fn normalize_path<T: AsRef<Path>>(path: T) -> PathBuf {
 pub struct AdlPackageDefinition {
     #[allow(dead_code)]
     pub name: String,
+    /// Optional in the JSON, matching the `= []` default in the ADL schema above.
+    #[serde(default)]
     pub dependencies: Vec<AdlPackageRef>,
 }
 
@@ -162,6 +183,29 @@ pub fn resolve_import(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_package_definition_skips_non_local_dependencies() {
+        let definition: AdlPackageDefinition = serde_json::from_str(
+            r#"{ "name": "app", "dependencies": ["stdlib", { "localdir": "../common" }] }"#,
+        )
+        .unwrap();
+        let localdirs: Vec<_> = definition
+            .dependencies
+            .iter()
+            .filter_map(AdlPackageRef::localdir)
+            .collect();
+        assert_eq!(localdirs, vec!["../common"]);
+    }
+
+    /// `dependencies` defaults to `[]` in the ADL schema, so real packages often omit it.
+    #[test]
+    fn test_package_definition_without_dependencies() {
+        let definition: AdlPackageDefinition =
+            serde_json::from_str(r#"{ "name": "protoapp" }"#).unwrap();
+        assert_eq!(definition.name, "protoapp");
+        assert!(definition.dependencies.is_empty());
+    }
 
     #[test]
     fn test_resolve_import_in_same_package_sibling() {
