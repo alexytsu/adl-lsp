@@ -48,7 +48,7 @@ async fn main() {
     });
 
     tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
+        .with_max_level(Level::from(cli.log_level))
         .with_ansi(false)
         .with_writer(std::io::stderr)
         .init();
