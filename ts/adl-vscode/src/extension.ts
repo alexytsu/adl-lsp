@@ -5,7 +5,11 @@ import {
   LanguageClientOptions,
   ServerOptions,
 } from "vscode-languageclient/node";
-import { checkVersionAndNotify } from "./check-version";
+import {
+  checkVersionAndNotify,
+  disposeVersionStatus,
+  notifyServerFailedToStart,
+} from "./check-version";
 import { registerCommands } from "./commands";
 import { getLspExecutable, getSearchDirs, getStdlibDir } from "./config";
 
@@ -58,16 +62,22 @@ export async function activate(context: v.ExtensionContext) {
     }
   });
 
-  await client.start();
+  // Registered before the server starts so the restart and update commands
+  // work even when it fails to.
+  registerCommands(client, context, executable.command);
 
-  const serverVersion = client.initializeResult?.serverInfo?.version;
-  console.log("Server version: ", serverVersion);
-  checkVersionAndNotify(serverVersion);
+  try {
+    await client.start();
+  } catch (error) {
+    notifyServerFailedToStart(executable.command, error);
+    return;
+  }
 
-  registerCommands(client, context);
+  checkVersionAndNotify(client);
 }
 
 export function deactivate() {
+  disposeVersionStatus();
   if (!client) {
     return undefined;
   }

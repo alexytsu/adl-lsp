@@ -80,6 +80,10 @@
       {
         "command": "adl-vscode.restart-language-server",
         "title": "ADL: Restart Language Server"
+      },
+      {
+        "command": "adl-vscode.update-language-server",
+        "title": "ADL: Update Language Server"
       }
     ]
   },

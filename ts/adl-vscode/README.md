@@ -23,6 +23,13 @@ Further planned features
 
 [CHANGELOG](https://marketplace.visualstudio.com/items/alexytsu.adl-vscode/changelog)
 
+## Commands
+
+- `ADL: Restart Language Server`: restart `adl-lsp`, for example after updating
+  it
+- `ADL: Update Language Server`: run or copy the command that installs the
+  latest `adl-lsp`
+
 ## Requirements
 
 You will need to install [adl-lsp](https://github.com/alexytsu/adl-lsp) and have
